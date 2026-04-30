@@ -2,7 +2,8 @@ package com.secondlife.inference
 
 import android.content.Context
 import android.graphics.Bitmap
-import com.google.mediapipe.tasks.genai.llminference.LlmInference
+import com.google.ai.edge.litertlm.Engine
+import com.google.ai.edge.litertlm.EngineConfig
 import com.secondlife.rag.BM25Retriever
 import com.secondlife.rag.ProtocolChunk
 import kotlinx.coroutines.Dispatchers
@@ -23,7 +24,7 @@ class InferenceSession(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
 
-    private var llmInference: LlmInference? = null
+    private var engine: Engine? = null
     private val retriever  = BM25Retriever(context, protocolsPath)
     private val auditLog   = KotlinAuditLog()
 
@@ -32,14 +33,21 @@ class InferenceSession(
     // ── Init ──────────────────────────────────────────────────────────────────
 
     suspend fun initModel() = withContext(Dispatchers.IO) {
-        if (llmInference != null) return@withContext
-        val options = LlmInference.LlmInferenceOptions.builder()
-            .setModelPath(modelPath)
-            .setMaxTokens(1024)
-            .setTopK(40)
-            .setTemperature(1.0f)
-            .build()
-        llmInference = LlmInference.createFromOptions(context, options)
+        if (engine != null) return@withContext
+        try {
+            val config = EngineConfig(
+                modelPath = modelPath
+            )
+            engine = Engine(config)
+            engine?.initialize()
+        } catch (e: Exception) {
+            _response.value = SecondLifeResponse(
+                response  = "Init Error: ${e.message}. Path: $modelPath",
+                citation  = "",
+                latencyMs = 0,
+                role      = currentRole,
+            )
+        }
     }
 
     // ── Respond ───────────────────────────────────────────────────────────────
@@ -55,7 +63,18 @@ class InferenceSession(
         try {
             val chunks   = retriever.retrieve(text, topK = 3)
             val prompt   = buildPrompt(text, chunks, currentRole, hasImage = image != null)
-            val result   = llmInference?.generateResponse(prompt) ?: "Model not initialized"
+            
+            val result = if (engine != null) {
+                val conversation = engine!!.createConversation()
+                var fullResponse = ""
+                conversation.sendMessageAsync(prompt).collect { token ->
+                    fullResponse += token
+                }
+                fullResponse
+            } else {
+                "Model not initialized"
+            }
+
             val latency  = System.currentTimeMillis() - startTime
             val citation = if (chunks.isNotEmpty())
                 "${chunks[0].source}, p.${chunks[0].page}"
@@ -71,7 +90,7 @@ class InferenceSession(
             )
         } catch (e: Exception) {
             _response.value = SecondLifeResponse(
-                response  = "Error: ${e.message}",
+                response  = "Inference Error: ${e.message}",
                 citation  = "",
                 latencyMs = 0,
                 role      = currentRole,
@@ -84,8 +103,8 @@ class InferenceSession(
     fun verifyAuditChain(): Boolean = auditLog.verifyChain()
 
     fun release() {
-        llmInference?.close()
-        llmInference = null
+        // Engine release if needed, currently LiteRT-LM Engine doesn't have close() in early versions
+        engine = null
     }
 
     // ── Prompt ────────────────────────────────────────────────────────────────
