@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -224,8 +225,13 @@ fun MainScreenContent(
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
 
-            // Main vertical flow. The transcript is in a LazyColumn so it scrolls
-            // independently of the persistent header / waveform / action bar.
+            val listState = rememberLazyListState()
+            // Auto-scroll to the newest item whenever the transcript or partial text changes.
+            val scrollTarget = state.transcript.size + if (state.partialTranscript.isNotBlank() && state.isListening) 1 else 0
+            LaunchedEffect(scrollTarget) {
+                if (scrollTarget > 0) listState.animateScrollToItem(scrollTarget - 1)
+            }
+
             Column(
                 Modifier
                     .fillMaxSize()
@@ -269,41 +275,32 @@ fun MainScreenContent(
 
                 Spacer(Modifier.height(20.dp))
 
-                // Latest "is speaking" card — only when there is a response to surface.
-                state.latestResponse?.let {
-                    SpeakingCard(
-                        response   = it,
-                        isSpeaking = state.isSpeaking,
-                    )
-                    Spacer(Modifier.height(20.dp))
-                }
-
-                if (state.transcript.size > 1 || state.partialTranscript.isNotBlank()) {
-                    SectionDivider(label = "Guidance · Transcript")
-                    Spacer(Modifier.height(8.dp))
-                }
-
+                // Conversation thread — all turns in chronological order.
+                // Bottom padding clears the floating action bar (~110 dp).
                 LazyColumn(
+                    state               = listState,
                     modifier            = Modifier.weight(1f).fillMaxWidth(),
-                    contentPadding      = PaddingValues(bottom = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding      = PaddingValues(bottom = 120.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    // Pending partial-transcript card (before the model has even started)
+                    items(state.transcript, key = { it.id }) { turn ->
+                        val isLatest  = turn.id == state.transcript.lastOrNull()?.id
+                        TranscriptTurnView(
+                            turn      = turn,
+                            role      = state.role,
+                            isLatest  = isLatest,
+                            isLoading = isLatest && state.isThinking,
+                        )
+                    }
+                    // Partial-transcript card appended live while the user speaks.
                     if (state.partialTranscript.isNotBlank() && state.isListening) {
                         item("partial") {
                             YouSaidCard(
-                                text       = state.partialTranscript,
-                                timestamp  = null,
-                                isPartial  = true,
+                                text      = state.partialTranscript,
+                                timestamp = null,
+                                isPartial = true,
                             )
                         }
-                    }
-                    // Newest first, but skip the latest entry (already shown in SpeakingCard).
-                    val history = state.transcript
-                        .dropLast(1)
-                        .asReversed()
-                    items(history, key = { it.id }) { turn ->
-                        TranscriptTurnView(turn = turn, role = state.role)
                     }
                 }
             }
@@ -581,68 +578,56 @@ private fun StatusIndicator(label: String, color: Color) {
     }
 }
 
-// ── Speaking card (top, current response) ───────────────────────────────────
+// ── Transcript: one turn ────────────────────────────────────────────────────
 @Composable
-private fun SpeakingCard(
-    response:   SecondLifeResponse,
-    isSpeaking: Boolean,
+private fun TranscriptTurnView(
+    turn:      TranscriptTurn,
+    role:      String,
+    isLatest:  Boolean = false,
+    isLoading: Boolean = false,
 ) {
-    Card(
-        Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape  = RoundedCornerShape(16.dp),
-    ) {
-        Column(Modifier.padding(20.dp)) {
-            Text(
-                text  = if (isSpeaking) "SecondLife is speaking".uppercase(Locale.US)
-                        else "SecondLife said".uppercase(Locale.US),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text  = highlightKeyTerms(response.response),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        YouSaidCard(text = turn.userText, timestamp = turn.createdAt)
+        when {
+            turn.response != null -> ProtocolCard(response = turn.response, role = role, isActive = isLatest)
+            isLoading             -> ThinkingRow()
         }
     }
 }
 
-// ── Section divider ─────────────────────────────────────────────────────────
 @Composable
-private fun SectionDivider(label: String) {
+private fun ThinkingRow() {
+    val transition = rememberInfiniteTransition(label = "thinking")
+    val alpha by transition.animateFloat(
+        initialValue  = 0.35f,
+        targetValue   = 1f,
+        animationSpec = infiniteRepeatable(tween(700, easing = LinearEasing), RepeatMode.Reverse),
+        label         = "dot-alpha",
+    )
+    val ext = LocalSecondLifeColors.current
     Row(
-        Modifier.fillMaxWidth(),
-        verticalAlignment     = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            Modifier
-                .weight(1f)
-                .height(1.dp)
-                .background(MaterialTheme.colorScheme.outline)
-        )
         Text(
-            text  = "  ${label.uppercase(Locale.US)}  ",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            text  = "THINKING",
+            style = MaterialTheme.typography.labelMedium,
+            color = ext.accentBlue.copy(alpha = alpha),
         )
-        Box(
-            Modifier
-                .weight(1f)
-                .height(1.dp)
-                .background(MaterialTheme.colorScheme.outline)
-        )
-    }
-}
-
-// ── Transcript: one turn ────────────────────────────────────────────────────
-@Composable
-private fun TranscriptTurnView(turn: TranscriptTurn, role: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        YouSaidCard(text = turn.userText, timestamp = turn.createdAt)
-        turn.response?.let { ProtocolCard(response = it, role = role) }
+        Spacer(Modifier.width(10.dp))
+        repeat(3) {
+            Box(
+                Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(ext.accentBlue.copy(alpha = alpha))
+            )
+            Spacer(Modifier.width(4.dp))
+        }
     }
 }
 
@@ -686,18 +671,19 @@ private fun YouSaidCard(text: String, timestamp: Long?, isPartial: Boolean = fal
 }
 
 @Composable
-private fun ProtocolCard(response: SecondLifeResponse, role: String) {
-    val ext = LocalSecondLifeColors.current
+private fun ProtocolCard(response: SecondLifeResponse, role: String, isActive: Boolean = false) {
+    val ext    = LocalSecondLifeColors.current
     val accent = ext.colorForRole(role)
     val title  = protocolTitleFromCitation(response.citation)
     val source = sourceLabelFromCitation(response.citation)
     val steps  = parseNumberedSteps(response.response)
+    val borderAlpha = if (isActive) 0.6f else 0.2f
 
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape  = RoundedCornerShape(14.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = 0.25f)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, accent.copy(alpha = borderAlpha)),
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(
