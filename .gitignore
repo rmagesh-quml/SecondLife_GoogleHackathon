@@ -28,5 +28,10 @@ build/
 *.apk
 local.properties
 
+# LiteRT runtime caches (generated on first model run)
+*.xnnpack_cache
+*_mldrift_program_cache.bin
+*.profraw
+
 # macOS
 .DS_Store
