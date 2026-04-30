@@ -1,69 +1,55 @@
 """
 ai-pipeline/audit_log/logger.py
 
-Append-only JSON audit log for SecondLife.
-
-Each inference call is logged as one JSON line in audit_log.json at the repo root.
-The file is gitignored — it must never be committed (may contain patient-adjacent data).
-
-Usage:
-    from ai_pipeline.audit_log.logger import AuditLogger
-    logger = AuditLogger()
-    logger.log(query="chest pain protocol", response=result)
+SHA-256 hash-chained append-only audit log.
+Each entry links to the previous via prev_hash, forming a tamper-evident chain.
+File is gitignored — never commit (may contain patient-adjacent data).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import threading
 import time
-from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-AUDIT_LOG_PATH = REPO_ROOT / "audit_log.json"
+DEFAULT_LOG_PATH = REPO_ROOT / "audit_log.json"
+
+GENESIS_HASH = "GENESIS"
 
 
-@dataclass
-class AuditEntry:
-    timestamp_ms: int
-    role: str
-    query: str
-    response_chars: int
-    citation: str
-    latency_ms: int
-    model: str
-    error: Optional[str] = None
+def _compute_hash(entry_without_hash: dict) -> str:
+    serialised = json.dumps(entry_without_hash, sort_keys=True)
+    return hashlib.sha256(serialised.encode()).hexdigest()
 
 
-class AuditLogger:
-    def __init__(self, log_path: Path = AUDIT_LOG_PATH) -> None:
-        self._path = log_path
+class AuditLog:
+    def __init__(self, path: Optional[Path] = None) -> None:
+        self._path = Path(path) if path else DEFAULT_LOG_PATH
+        self._lock = threading.Lock()
 
-    def log(
-        self,
-        query: str,
-        role: str,
-        citation: str,
-        latency_ms: int,
-        response_chars: int,
-        model: str = "gemma-4-E4B",
-        error: Optional[str] = None,
-    ) -> None:
-        entry = AuditEntry(
-            timestamp_ms=int(time.time() * 1000),
-            role=role,
-            query=query,
-            response_chars=response_chars,
-            citation=citation,
-            latency_ms=latency_ms,
-            model=model,
-            error=error,
-        )
-        with open(self._path, "a") as f:
-            f.write(json.dumps(asdict(entry)) + "\n")
+    # ── Write ──────────────────────────────────────────────────────────────────
 
-    def read_all(self) -> list[AuditEntry]:
+    def log(self, query: str, response: str, role: str) -> None:
+        with self._lock:
+            prev_hash = self._last_hash()
+            entry = {
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "role": role,
+                "query": query,
+                "response": response,
+                "prev_hash": prev_hash,
+            }
+            entry["hash"] = _compute_hash(entry)
+            with open(self._path, "a") as f:
+                f.write(json.dumps(entry) + "\n")
+
+    # ── Read ───────────────────────────────────────────────────────────────────
+
+    def get_all_entries(self) -> list[dict]:
         if not self._path.exists():
             return []
         entries = []
@@ -71,5 +57,30 @@ class AuditLogger:
             for line in f:
                 line = line.strip()
                 if line:
-                    entries.append(AuditEntry(**json.loads(line)))
+                    entries.append(json.loads(line))
         return entries
+
+    # ── Verify ─────────────────────────────────────────────────────────────────
+
+    def verify_chain(self) -> bool:
+        entries = self.get_all_entries()
+        if not entries:
+            return True
+
+        expected_prev = GENESIS_HASH
+        for entry in entries:
+            if entry.get("prev_hash") != expected_prev:
+                return False
+            # Recompute hash without the "hash" field
+            body = {k: v for k, v in entry.items() if k != "hash"}
+            if _compute_hash(body) != entry.get("hash"):
+                return False
+            expected_prev = entry["hash"]
+
+        return True
+
+    # ── Internal ───────────────────────────────────────────────────────────────
+
+    def _last_hash(self) -> str:
+        entries = self.get_all_entries()
+        return entries[-1]["hash"] if entries else GENESIS_HASH
