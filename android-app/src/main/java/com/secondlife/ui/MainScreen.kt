@@ -1,5 +1,6 @@
 package com.secondlife.ui
 
+import android.annotation.SuppressLint
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
@@ -11,19 +12,25 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.secondlife.audio.AudioCaptureManager
 import com.secondlife.inference.SecondLifeViewModel
 import com.secondlife.tts.TTSManager
+import kotlinx.coroutines.launch
 
+@SuppressLint("MissingPermission")   // RECORD_AUDIO permission is requested in MainActivity
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainScreen(viewModel: SecondLifeViewModel, ttsManager: TTSManager) {
+fun MainScreen(
+    viewModel: SecondLifeViewModel,
+    ttsManager: TTSManager,
+    audioCapture: AudioCaptureManager,
+) {
     val response by viewModel.response.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(response) {
-        response?.let {
-            ttsManager.speak(it.response)
-        }
+        response?.let { ttsManager.speak(it.response) }
     }
 
     Scaffold(
@@ -38,13 +45,20 @@ fun MainScreen(viewModel: SecondLifeViewModel, ttsManager: TTSManager) {
                 modifier = Modifier.padding(bottom = 16.dp)
             ) {
                 LargeFloatingActionButton(
-                    onClick = { viewModel.query("How to treat a burn?") },
+                    onClick = {
+                        scope.launch {
+                            val pcmBytes = audioCapture.captureUntilSilence()
+                            // TODO: pass pcmBytes through STT to get transcript
+                            val transcript = "How to treat a burn?"
+                            viewModel.query(text = transcript, audio = pcmBytes)
+                        }
+                    },
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 ) {
                     Icon(Icons.Default.Mic, contentDescription = "Mic", modifier = Modifier.size(36.dp))
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("Hold to speak clinical question", style = MaterialTheme.typography.bodySmall)
+                Text("Tap to speak a clinical question", style = MaterialTheme.typography.bodySmall)
             }
         },
         floatingActionButtonPosition = FabPosition.Center
@@ -113,8 +127,7 @@ fun MainScreen(viewModel: SecondLifeViewModel, ttsManager: TTSManager) {
                     )
                 }
             }
-            
-            // Layout spacer for FAB area
+
             Spacer(modifier = Modifier.height(100.dp))
         }
     }
