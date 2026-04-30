@@ -1,0 +1,27 @@
+{
+  "model": "gemma-4-E4B-it.litertlm",
+  "backend": "GPU",
+  "timestamp": "2026-04-30T19:28:35.408545+00:00",
+  "native_benchmark": {
+    "passes_total": 5,
+    "passes_measured": 4,
+    "prefill_tokens": 128,
+    "decode_tokens": 256,
+    "init_time_s": 4.179,
+    "ttft_avg_s": 0.336,
+    "ttft_min_s": 0.31,
+    "ttft_max_s": 0.35,
+    "decode_tokens_per_s_avg": 36.0,
+    "decode_tokens_per_s_min": 35.9,
+    "decode_tokens_per_s_max": 36.0,
+    "prefill_tokens_per_s_avg": 415.8
+  },
+  "e2e_benchmark": {
+    "passes_total": 5,
+    "passes_measured": 4,
+    "e2e_latency_avg_ms": 15880,
+    "e2e_latency_min_ms": 13676,
+    "e2e_latency_max_ms": 18185,
+    "avg_response_chars": 663
+  }
+}
