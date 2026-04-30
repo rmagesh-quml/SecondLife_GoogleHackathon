@@ -8,45 +8,73 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.material3.MaterialTheme
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.secondlife.audio.AudioCaptureManager
+import com.secondlife.audio.SpeechManager
+import com.secondlife.camera.CameraManager
 import com.secondlife.inference.SecondLifeViewModel
 import com.secondlife.tts.TTSManager
 import com.secondlife.ui.MainScreen
+import com.secondlife.ui.theme.SecondLifeTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
     private val viewModel: SecondLifeViewModel by viewModels()
-    private lateinit var ttsManager: TTSManager
-    private lateinit var audioCapture: AudioCaptureManager
 
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { /* permission result handled silently; mic FAB checks state */ }
+    private lateinit var ttsManager:   TTSManager
+    private lateinit var speechManager: SpeechManager
+    private lateinit var audioCapture: AudioCaptureManager
+    private lateinit var cameraManager: CameraManager
+
+    private val permLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { /* permissions handled gracefully in the UI */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         ttsManager   = TTSManager(this)
+        speechManager = SpeechManager(this)
         audioCapture = AudioCaptureManager(this)
+        cameraManager = CameraManager(this, this)   // 'this' as LifecycleOwner
 
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
-            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        // Wire speech → query pipeline
+        speechManager.onResult = { transcript ->
+            viewModel.query(text = transcript)
         }
+        speechManager.onError = { msg ->
+            viewModel.postError(msg)
+        }
+
+        // Initialise camera in background
+        lifecycleScope.launch {
+            runCatching { cameraManager.initialize() }
+        }
+
+        // Request permissions upfront
+        val needed = listOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
+            .filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+        if (needed.isNotEmpty()) permLauncher.launch(needed.toTypedArray())
 
         enableEdgeToEdge()
         setContent {
-            MaterialTheme {
-                MainScreen(viewModel, ttsManager, audioCapture)
+            SecondLifeTheme {
+                MainScreen(
+                    viewModel     = viewModel,
+                    ttsManager    = ttsManager,
+                    speechManager = speechManager,
+                    cameraManager = cameraManager,
+                )
             }
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        if (::ttsManager.isInitialized) ttsManager.release()
+        if (::ttsManager.isInitialized)    ttsManager.release()
+        if (::speechManager.isInitialized) speechManager.destroy()
+        if (::cameraManager.isInitialized) cameraManager.release()
     }
 }
