@@ -10,7 +10,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import com.secondlife.audio.AudioCaptureManager
 import com.secondlife.audio.SpeechManager
 import com.secondlife.camera.CameraManager
 import com.secondlife.inference.SecondLifeViewModel
@@ -25,7 +24,6 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var ttsManager:   TTSManager
     private lateinit var speechManager: SpeechManager
-    private lateinit var audioCapture: AudioCaptureManager
     private lateinit var cameraManager: CameraManager
 
     private val permLauncher = registerForActivityResult(
@@ -35,9 +33,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        ttsManager   = TTSManager(this)
+        ttsManager    = TTSManager(this)
         speechManager = SpeechManager(this)
-        audioCapture = AudioCaptureManager(this)
         cameraManager = CameraManager(this, this)   // 'this' as LifecycleOwner
 
         // Wire speech → query pipeline

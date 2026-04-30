@@ -4,79 +4,190 @@ import android.app.Application
 import android.graphics.Bitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
 
+/**
+ * ViewModel that owns the list of [EmergencySession]s.
+ *
+ * ─── Backend gaps the UI cannot close on its own ──────────────────────────
+ * The session list is purely UI-side. To make sessions feel "real" end-to-end
+ * the backend would need:
+ *   1. [InferenceSession.respond] to accept a session id (or a per-session
+ *      Conversation) so two emergencies don't share a single live `_response`
+ *      / `_isLoading` flow.
+ *   2. The prompt builder to include prior-turn context for the active
+ *      session (currently each call builds a fresh prompt with zero history,
+ *      so the model has no per-session memory — only the UI does).
+ *   3. The audit log chain to be partitioned by session id (currently a
+ *      single global chain across all sessions).
+ *   4. Persistence (Room / DataStore) so sessions survive process death.
+ * None of these are touched by this PR — they are intentionally listed here
+ * for whoever owns `ai-pipeline/` and the audit-log code.
+ */
 class SecondLifeViewModel(application: Application) : AndroidViewModel(application) {
 
     private val modelPath     = resolveModelPath(application)
     private val protocolsPath = resolveProtocolsPath(application)
     private val session       = InferenceSession(application, modelPath, protocolsPath)
 
-    val response:  StateFlow<SecondLifeResponse?> = session.response
-    val isLoading: StateFlow<Boolean>             = session.isLoading
+    val isLoading: StateFlow<Boolean> = session.isLoading
 
-    // Captured camera frame — set by MainActivity, cleared after each query
+    // Captured camera frame — staged across queries until cleared.
     private val _capturedImage = MutableStateFlow<Bitmap?>(null)
-    val capturedImage: StateFlow<Bitmap?> = _capturedImage
+    val capturedImage: StateFlow<Bitmap?> = _capturedImage.asStateFlow()
 
-    // Error snackbar text
     private val _error = MutableStateFlow<String?>(null)
-    val error: StateFlow<String?> = _error
+    val error: StateFlow<String?> = _error.asStateFlow()
 
-    // Track the active query so we can cancel it on newEmergency() / setRole()
-    private var activeQueryJob: Job? = null
+    // ── Sessions ────────────────────────────────────────────────────────────
+    private val initialSession = EmergencySession()
+
+    private val _sessions = MutableStateFlow(listOf(initialSession))
+    val sessions: StateFlow<List<EmergencySession>> = _sessions.asStateFlow()
+
+    private val _activeSessionId = MutableStateFlow(initialSession.id)
+    val activeSessionId: StateFlow<String> = _activeSessionId.asStateFlow()
+
+    // Derived flows: always read the active session's slice.
+    val transcript: StateFlow<List<TranscriptTurn>> =
+        _sessions.combine(_activeSessionId) { ss, id ->
+            ss.firstOrNull { it.id == id }?.transcript ?: emptyList()
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val role: StateFlow<String> =
+        _sessions.combine(_activeSessionId) { ss, id ->
+            ss.firstOrNull { it.id == id }?.role ?: "layperson"
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, "layperson")
+
+    val sessionStartedAt: StateFlow<Long?> =
+        _sessions.combine(_activeSessionId) { ss, id ->
+            ss.firstOrNull { it.id == id }?.sessionStartedAt
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    // The latest completed response on the *active* session — drives TTS.
+    val response: StateFlow<SecondLifeResponse?> =
+        transcript.stateInMappedToResponse()
 
     init {
         viewModelScope.launch { session.initModel() }
     }
 
-    fun setCapturedImage(bitmap: Bitmap?) {
-        _capturedImage.value = bitmap
+    // ── Camera ──────────────────────────────────────────────────────────────
+    fun setCapturedImage(bitmap: Bitmap?) { _capturedImage.value = bitmap }
+    fun clearCapturedImage()              { _capturedImage.value = null }
+
+    // ── Error snackbar ──────────────────────────────────────────────────────
+    fun dismissError()         { _error.value = null }
+    fun postError(msg: String) { _error.value = msg }
+
+    // ── Sessions API ────────────────────────────────────────────────────────
+    fun newSession() {
+        val s = EmergencySession()
+        _sessions.value         = _sessions.value + s
+        _activeSessionId.value  = s.id
+        session.currentRole     = s.role
+        session.resetConversation()
+        _capturedImage.value    = null
     }
 
-    fun clearCapturedImage() {
-        _capturedImage.value = null
+    fun selectSession(id: String) {
+        if (_sessions.value.none { it.id == id }) return
+        _activeSessionId.value = id
+        session.currentRole    = activeOrNull()?.role ?: "layperson"
     }
 
-    fun query(text: String, audio: Any? = null) {
-        val image = _capturedImage.value   // snapshot — include whatever is staged
-        activeQueryJob?.cancel()
-        activeQueryJob = viewModelScope.launch {
-            session.respond(text, audio = audio, image = image)
-            // Keep image staged so judges can see it; user taps × to clear
+    fun deleteSession(id: String) {
+        val remaining = _sessions.value.filter { it.id != id }
+        if (remaining.isEmpty()) {
+            val fresh = EmergencySession()
+            _sessions.value        = listOf(fresh)
+            _activeSessionId.value = fresh.id
+        } else {
+            _sessions.value = remaining
+            if (_activeSessionId.value == id) {
+                _activeSessionId.value = remaining.first().id
+            }
         }
+        session.currentRole = activeOrNull()?.role ?: "layperson"
     }
 
     fun setRole(role: String) {
-        // Cancel any in-flight query so it can't overwrite the new context
-        activeQueryJob?.cancel()
-        session.resetConversation()
+        updateActive { it.copy(role = role) }
         session.currentRole = role
-        session.clearResponse()
     }
 
-    /** Start fresh — new emergency, wipe context, clear image and response. */
-    fun newEmergency() {
-        // Cancel in-flight query first — prevents old response bleeding into new session
-        activeQueryJob?.cancel()
-        session.resetConversation()
-        session.clearResponse()
+    /** Stop in-flight TTS / listening. Does NOT delete the session. */
+    fun cancelSession() {
         _capturedImage.value = null
+    }
+
+    // ── Query ───────────────────────────────────────────────────────────────
+    /**
+     * Run a query on the *active* session. Captures the active id at dispatch
+     * time so switching sessions while the model is thinking still routes the
+     * response back to the originating session.
+     */
+    fun query(text: String, audio: Any? = null) {
+        if (text.isBlank()) return
+        val capturedId  = _activeSessionId.value
+        val pendingTurn = TranscriptTurn(userText = text, response = null)
+
+        updateActive { sess ->
+            sess.copy(
+                transcript       = sess.transcript + pendingTurn,
+                sessionStartedAt = sess.sessionStartedAt ?: System.currentTimeMillis(),
+                title            = if (sess.title == EmergencySession.DEFAULT_TITLE && sess.transcript.isEmpty())
+                                       EmergencySession.titleFromQuery(text)
+                                   else sess.title,
+            )
+        }
+
+        val image = _capturedImage.value
+        viewModelScope.launch {
+            session.respond(text, audio = audio, image = image)
+            val completed = session.response.value ?: return@launch
+            _sessions.value = _sessions.value.map { sess ->
+                if (sess.id != capturedId) return@map sess
+                sess.copy(
+                    transcript = sess.transcript.map { t ->
+                        if (t.id == pendingTurn.id) t.copy(response = completed) else t
+                    }
+                )
+            }
+        }
     }
 
     fun verifyAuditChain(): Boolean = session.verifyAuditChain()
 
-    fun dismissError() { _error.value = null }
-
-    fun postError(msg: String) { _error.value = msg }
-
     override fun onCleared() {
         super.onCleared()
         session.release()
+    }
+
+    // ── Internals ───────────────────────────────────────────────────────────
+    private fun activeOrNull(): EmergencySession? =
+        _sessions.value.firstOrNull { it.id == _activeSessionId.value }
+
+    private fun updateActive(transform: (EmergencySession) -> EmergencySession) {
+        val id = _activeSessionId.value
+        _sessions.value = _sessions.value.map { if (it.id == id) transform(it) else it }
+    }
+
+    private fun StateFlow<List<TranscriptTurn>>.stateInMappedToResponse(): StateFlow<SecondLifeResponse?> {
+        return kotlinx.coroutines.flow.MutableStateFlow<SecondLifeResponse?>(null).also { out ->
+            viewModelScope.launch {
+                collect { turns ->
+                    out.value = turns.lastOrNull { it.response != null }?.response
+                }
+            }
+        }
     }
 
     companion object {
@@ -91,7 +202,6 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
                 val f = File(dir, "gemma-4-E4B-it.litertlm")
                 if (f.exists()) return f.absolutePath
             }
-            // Fallback path — app will show an init error with the path so you know where to push
             return File(app.filesDir, "gemma-4-E4B-it.litertlm").absolutePath
         }
 
