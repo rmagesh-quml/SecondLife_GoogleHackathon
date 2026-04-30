@@ -63,8 +63,8 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
 
     companion object {
         private fun resolveModelPath(app: Application): String {
-            val emulator = File("/data/local/tmp/gemma-4-E4B-it-web.task")
-            val device   = File(app.filesDir, "gemma-4-E4B-it-web.task")
+            val emulator = File("/data/local/tmp/gemma-4-E4B-it.litertlm")
+            val device   = File(app.filesDir, "gemma-4-E4B-it.litertlm")
             return when {
                 emulator.exists() -> emulator.absolutePath
                 else              -> device.absolutePath

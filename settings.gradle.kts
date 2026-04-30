@@ -16,6 +16,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven { url = uri("https://storage.googleapis.com/ai-edge/android/") }
     }
 }
 

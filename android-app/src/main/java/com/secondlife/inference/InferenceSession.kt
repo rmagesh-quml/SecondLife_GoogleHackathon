@@ -2,7 +2,7 @@ package com.secondlife.inference
 
 import android.content.Context
 import android.graphics.Bitmap
-import com.google.mediapipe.tasks.genai.llminference.LlmInference
+import com.google.ai.edge.litert.lm.LlmInference
 import com.secondlife.rag.BM25Retriever
 import com.secondlife.rag.ProtocolChunk
 import kotlinx.coroutines.Dispatchers
