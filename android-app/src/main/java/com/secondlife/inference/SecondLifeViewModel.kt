@@ -42,7 +42,7 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         val image = _capturedImage.value   // snapshot — include whatever is staged
         viewModelScope.launch {
             session.respond(text, audio = audio, image = image)
-            // Keep the image staged so judges can see it during the demo; user can tap × to clear
+            // Keep image staged so judges can see it; user taps × to clear
         }
     }
 
@@ -63,12 +63,18 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
 
     companion object {
         private fun resolveModelPath(app: Application): String {
-            val emulator = File("/data/local/tmp/gemma-4-E4B-it.litertlm")
-            val device   = File(app.filesDir, "gemma-4-E4B-it.litertlm")
-            return when {
-                emulator.exists() -> emulator.absolutePath
-                else              -> device.absolutePath
+            val dirs = listOf(
+                "/data/local/tmp/",
+                "/sdcard/Download/models/",
+                "/storage/emulated/0/Download/models/",
+                app.filesDir.absolutePath + "/",
+            )
+            for (dir in dirs) {
+                val f = File(dir, "gemma-4-E4B-it.litertlm")
+                if (f.exists()) return f.absolutePath
             }
+            // Fallback path — app will show an init error with the path so you know where to push
+            return File(app.filesDir, "gemma-4-E4B-it.litertlm").absolutePath
         }
 
         private fun resolveProtocolsPath(app: Application): String? {
