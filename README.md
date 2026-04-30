@@ -62,7 +62,7 @@ Every query is logged in a SHA-256 hash-chained audit file — tamper-evident an
 |-------|-----------|
 | On-device LLM | Gemma 4 E4B via LiteRT-LM |
 | Retrieval | FAISS + fastembed (BAAI/bge-small-en-v1.5) |
-| Android AI | MediaPipe Tasks GenAI 0.10.35 |
+| Android AI | LiteRT-LM 0.1.0 |
 | Android UI | Jetpack Compose + Kotlin |
 | Audio | Android AudioRecord (PCM 16-bit 16kHz mono) |
 | Camera | CameraX (768×768 RGB) |
@@ -105,7 +105,7 @@ python ai-pipeline/inference/benchmark.py
 
 ```bash
 # Push model and protocols to device
-adb push shared/models/gemma-4-E4B-it-web.task /data/local/tmp/gemma-4-E4B-it-web.task
+adb push shared/models/gemma-4-E4B-it.litertlm /data/local/tmp/gemma-4-E4B-it.litertlm
 adb push data/chunks/protocols.json /data/data/com.secondlife/files/protocols.json
 
 # Build and install
@@ -120,7 +120,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 SecondLife/
 ├── ai-pipeline/          Shravan — RAG, Gemma 4, roles, audit, benchmark
-├── android-app/          Sid — Compose UI, ViewModel, MediaPipe, TTS
+├── android-app/          Sid — Compose UI, ViewModel, LiteRT-LM, TTS
 ├── vision-audio/         Rohan — AudioRecord, CameraX
 ├── data/
 │   ├── chunks/protocols.json     Pre-chunked clinical protocols (FAISS source)
