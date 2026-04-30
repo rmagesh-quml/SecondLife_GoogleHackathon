@@ -1,0 +1,75 @@
+{
+  "version": "1.0",
+  "scenarios": [
+    {
+      "id": "ts_001",
+      "role": "layperson",
+      "query": "A child is choking and cannot cough or breathe",
+      "expected_citation": "redcross_choking.pdf",
+      "expected_keywords": ["back blow", "thrust", "abdominal", "kneel", "cough"]
+    },
+    {
+      "id": "ts_002",
+      "role": "layperson",
+      "query": "Person collapsed, not breathing, no pulse",
+      "expected_citation": "aha_cpr_guidelines.pdf",
+      "expected_keywords": ["compression", "chest", "cpr", "rescue breath", "911"]
+    },
+    {
+      "id": "ts_003",
+      "role": "paramedic",
+      "query": "Severe arterial bleeding from lower leg wound",
+      "expected_citation": "trauma_bleeding_control.pdf",
+      "expected_keywords": ["tourniquet", "pressure", "wound", "bleeding", "elevate"]
+    },
+    {
+      "id": "ts_004",
+      "role": "layperson",
+      "query": "Elderly man suddenly cannot speak and his face is drooping",
+      "expected_citation": "stroke_recognition.pdf",
+      "expected_keywords": ["stroke", "face", "arm", "speech", "fast", "911", "time"]
+    },
+    {
+      "id": "ts_005",
+      "role": "layperson",
+      "query": "Person is having a seizure and shaking on the floor",
+      "expected_citation": "epilepsy_first_aid.pdf",
+      "expected_keywords": ["restrain", "mouth", "time", "recovery", "side", "cushion"]
+    },
+    {
+      "id": "ts_006",
+      "role": "layperson",
+      "query": "Child has a burn on their arm from boiling water",
+      "expected_citation": "burns_first_aid.pdf",
+      "expected_keywords": ["cool", "water", "running", "minutes", "ice", "cream"]
+    },
+    {
+      "id": "ts_007",
+      "role": "paramedic",
+      "query": "Patient is unresponsive with hives, severe throat swelling after eating peanuts",
+      "expected_citation": "anaphylaxis_protocol.pdf",
+      "expected_keywords": ["epinephrine", "epipen", "adrenaline", "anaphylaxis", "911", "thigh"]
+    },
+    {
+      "id": "ts_008",
+      "role": "layperson",
+      "query": "Elderly woman fell down stairs and is not responding, possible head and neck injury",
+      "expected_citation": "head_injury_protocol.pdf",
+      "expected_keywords": ["move", "spine", "spinal", "neck", "recovery", "911", "breathing"]
+    },
+    {
+      "id": "ts_009",
+      "role": "military_medic",
+      "query": "Casualty with gunshot wound to upper thigh, heavy bleeding, still conscious",
+      "expected_citation": "trauma_bleeding_control.pdf",
+      "expected_keywords": ["tourniquet", "hemorrhage", "bleed", "pressure", "wound", "tight"]
+    },
+    {
+      "id": "ts_010",
+      "role": "paramedic",
+      "query": "Diabetic patient found confused and shaking, blood sugar unknown",
+      "expected_citation": "medical_emergencies.pdf",
+      "expected_keywords": ["glucose", "sugar", "conscious", "swallow", "glucagon", "hypo"]
+    }
+  ]
+}

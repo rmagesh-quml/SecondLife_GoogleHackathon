@@ -1,0 +1,194 @@
+[
+  {
+    "id": "cpr_adult_001",
+    "source": "aha_cpr_guidelines.pdf",
+    "page": 1,
+    "text": "Adult CPR — cardiac arrest, no pulse, person collapsed unresponsive: Check scene safety, then check responsiveness by tapping shoulders and shouting. If unresponsive, not breathing normally, and no pulse — begin CPR immediately. Call 911 or direct someone to call. Position heel of hand on centre of chest (lower half of sternum), interlock fingers, keep arms straight. Compress 5–6 cm deep at 100–120 compressions per minute. Allow full chest recoil between compressions. After 30 compressions, tilt head back, lift chin, and give 2 rescue breaths over 1 second each — chest should visibly rise. Continue 30:2 ratio until AED arrives, advanced help takes over, or person shows signs of life. Minimize interruptions to compressions — keep pauses under 10 seconds."
+  },
+  {
+    "id": "cpr_adult_002",
+    "source": "aha_cpr_guidelines.pdf",
+    "page": 2,
+    "text": "AED use during CPR: Turn on AED as soon as available. Attach pads — one below right collarbone, one on left side below armpit. Ensure no one is touching the patient. Follow voice prompts exactly. If shock advised, stand clear and press shock button. Immediately resume CPR starting with chest compressions. Analyze rhythm every 2 minutes. If no shock advised, resume CPR immediately. Do not delay compressions to use AED — have a second rescuer operate AED while CPR continues. Compressions-first approach: for every 1 minute without CPR, survival decreases 10%."
+  },
+  {
+    "id": "cpr_child_001",
+    "source": "aha_cpr_guidelines.pdf",
+    "page": 5,
+    "text": "Child CPR (ages 1 to puberty): Same 30:2 ratio for single rescuer, 15:2 for two healthcare rescuers. Use one or two hands depending on child size — compress one-third depth of chest (approximately 5 cm). Begin with 5 rescue breaths if child is unresponsive and not breathing before starting compressions. Use child or infant pads on AED if available. If lone rescuer and no phone, give 5 cycles of CPR (about 2 minutes) before calling 911. Paediatric cardiac arrest is often respiratory in origin — rescue breaths are more critical than in adults."
+  },
+  {
+    "id": "cpr_infant_001",
+    "source": "aha_cpr_guidelines.pdf",
+    "page": 7,
+    "text": "Infant CPR (under 1 year): Place two fingers on centre of chest just below nipple line. Compress 4 cm deep, 100–120 per minute. Give 2 gentle puffs — use only enough air to see chest rise. 30:2 ratio single rescuer, 15:2 two rescuers. Do NOT tilt head back far — neutral position to avoid airway kinking. If no breathing, begin with 5 rescue breaths. Infant cardiac arrest is almost always respiratory — prioritise airway. Do NOT use adult AED pads without paediatric attenuator."
+  },
+  {
+    "id": "choking_adult_001",
+    "source": "redcross_choking.pdf",
+    "page": 1,
+    "text": "Choking adult — conscious: Confirm choking by asking 'Are you choking?' If unable to speak, cough, or breathe, act immediately. Lean person forward and give 5 sharp back blows between shoulder blades with heel of hand. If back blows fail, stand behind, make fist with thumb side against abdomen just above navel, grasp fist with other hand, give 5 quick upward-inward abdominal thrusts. Alternate 5 back blows with 5 abdominal thrusts until object is expelled or person loses consciousness. For pregnant or obese individuals use chest thrusts instead of abdominal thrusts."
+  },
+  {
+    "id": "choking_adult_002",
+    "source": "redcross_choking.pdf",
+    "page": 2,
+    "text": "Choking adult — becomes unconscious: Lower person to ground carefully. Call 911 if not already done. Begin CPR starting with compressions. Before giving breaths, look in mouth — if you can see the object, remove it with a finger sweep. Do NOT perform blind finger sweeps. After each set of compressions, look in mouth before attempting breaths. Continue until object is expelled, EMS arrives, or person begins breathing normally. Self-treatment for choking alone: use abdominal thrusts on yourself or thrust abdomen against a firm edge like a chair back or countertop."
+  },
+  {
+    "id": "choking_child_001",
+    "source": "redcross_choking.pdf",
+    "page": 3,
+    "text": "Choking child (1 year to puberty): If child can cough forcefully, encourage coughing — do not interfere. If unable to breathe, cough, or speak: kneel or stand behind child, lean child forward, deliver 5 firm back blows between shoulder blades. Then give 5 abdominal thrusts with fist above navel, using less force than for an adult. Alternate 5 back blows and 5 abdominal thrusts. If child becomes unconscious, begin CPR. Look in mouth before giving breaths — remove object only if clearly visible. Do not perform blind finger sweeps."
+  },
+  {
+    "id": "choking_infant_001",
+    "source": "redcross_choking.pdf",
+    "page": 4,
+    "text": "Choking infant (under 1 year): Hold infant face-down on your forearm, head lower than chest, supporting head. Give 5 firm back blows between shoulder blades with heel of hand. Turn infant face-up supporting head, give 5 chest thrusts with 2 fingers on centre of chest just below nipple line — push down 4 cm. Alternate 5 back blows and 5 chest thrusts. Do NOT perform abdominal thrusts on infants — risk of liver injury. Look in mouth before giving breaths. If no breathing after removing object, begin infant CPR."
+  },
+  {
+    "id": "bleeding_limb_001",
+    "source": "trauma_bleeding_control.pdf",
+    "page": 1,
+    "text": "Severe limb bleeding — direct pressure: Apply firm direct pressure with a clean cloth or dressing. Press hard and do not lift cloth — if soaked, apply additional dressings on top. Elevate the injured limb above the level of the heart if no fracture is suspected. Maintain continuous pressure for at least 10 minutes without peeking. If bleeding is controlled, secure with a bandage. Watch for signs of shock: pale, cold, clammy skin; rapid weak pulse; rapid shallow breathing; confusion or anxiety. Keep person warm and still. Call 911 if not already done."
+  },
+  {
+    "id": "bleeding_tourniquet_001",
+    "source": "trauma_bleeding_control.pdf",
+    "page": 2,
+    "text": "Tourniquet application for life-threatening limb bleeding: Apply when direct pressure fails to control bleeding or wound is too large to pack. Place tourniquet 5–7 cm above wound on the limb — NOT over a joint. Tighten until bleeding stops completely. Note the exact time of application — write it on the tourniquet or patient's forehead. Do NOT remove once applied — leave for surgical intervention. Improvised tourniquet: use cloth at least 4 cm wide, never wire or rope. Commercial tourniquets (CAT, SOFT-T Wide) preferred. Patient will experience significant pain — this is expected and does not mean it is too tight."
+  },
+  {
+    "id": "bleeding_junctional_001",
+    "source": "trauma_bleeding_control.pdf",
+    "page": 3,
+    "text": "Junctional and torso bleeding (not amenable to tourniquet): Do NOT apply tourniquet to torso, neck, groin, or axilla. Pack wound tightly with gauze — push gauze deep into wound cavity with fingers and apply firm constant pressure. Hold pressure for minimum 3 minutes. If wound packing fails, apply haemostatic gauze (Combat Gauze, QuikClot) and re-pack. For chest wounds: if sucking chest wound (air drawn in on inhalation), cover with gloved hand or vented chest seal. Do NOT apply non-vented seal without monitoring for tension pneumothorax. Call 911 immediately — junctional bleeding is rapidly fatal."
+  },
+  {
+    "id": "stroke_001",
+    "source": "stroke_recognition.pdf",
+    "page": 1,
+    "text": "Stroke recognition — BE-FAST: Balance — sudden loss of balance or coordination. Eyes — sudden vision changes in one or both eyes. Face — ask person to smile, check for drooping on one side. Arms — ask person to raise both arms, check if one drifts down. Speech — ask person to repeat a simple phrase, check for slurred or garbled speech. Time — if ANY sign present, call 911 immediately. Note the EXACT time symptoms started — this determines eligibility for clot-busting treatment. Time is brain: every minute untreated = 1.9 million neurons lost. Do not give food or water. Keep person still and calm."
+  },
+  {
+    "id": "stroke_002",
+    "source": "stroke_recognition.pdf",
+    "page": 2,
+    "text": "Stroke — what to do while waiting for EMS: Keep person in a comfortable position — lying down with head and shoulders slightly elevated if conscious. If unconscious but breathing, place in recovery position on their side. Do NOT give aspirin unless physician has pre-authorised it (some strokes are haemorrhagic). Monitor breathing and level of consciousness. Do NOT give food, water, or any medications by mouth — swallowing may be impaired. Be ready to start CPR if person stops breathing. Reassure person — they may be frightened and confused. Do not leave them alone."
+  },
+  {
+    "id": "seizure_001",
+    "source": "epilepsy_first_aid.pdf",
+    "page": 1,
+    "text": "Seizure first aid: Stay calm and protect the person from injury — clear hard objects away, cushion the head with something soft. Do NOT restrain the person. Do NOT put anything in their mouth — there is no risk of swallowing the tongue. Do NOT give water or food during or immediately after seizure. Time the seizure from start. After convulsions stop, place person in recovery position on their side to keep airway clear. Stay with them until fully conscious — post-ictal confusion can last 15–30 minutes. Speak calmly and reassure them when responsive."
+  },
+  {
+    "id": "seizure_002",
+    "source": "epilepsy_first_aid.pdf",
+    "page": 2,
+    "text": "When to call 911 for seizure: Call emergency services if: seizure lasts more than 5 minutes; person does not recover consciousness; a second seizure follows without recovery; person is pregnant; person has been injured during seizure; person is diabetic; seizure happened in water; person has no known history of seizures or epilepsy; this is the person's first seizure. If person has prescribed midazolam or diazepam, administer per their care plan. Document: time of seizure, duration, type of movements, whether person lost consciousness, any injuries."
+  },
+  {
+    "id": "burns_001",
+    "source": "burns_first_aid.pdf",
+    "page": 1,
+    "text": "Burns first aid — cooling: Cool the burn under cool running water for a minimum of 20 minutes. Start cooling immediately — even up to 3 hours after injury if skin not already cooled. Water should be cool, not ice cold — temperatures below 8°C can cause further injury. Do NOT use ice, ice packs, butter, toothpaste, or any cream. Remove jewellery, watches, and clothing near the burn before swelling starts — unless stuck to skin. Cover with cling film (plastic wrap) or a clean plastic bag after cooling. Do not wrap tightly. Burns over 1% body surface area (size of patient's palm) in children require hospital assessment."
+  },
+  {
+    "id": "burns_002",
+    "source": "burns_first_aid.pdf",
+    "page": 2,
+    "text": "Burns — when to call 911: Seek emergency care for: burns larger than the palm of the casualty's hand; burns on face, hands, feet, genitals, or joints; full thickness burns (waxy white or charred — no pain at centre); chemical or electrical burns; inhalation burns (singed nasal hairs, hoarse voice, sooty sputum); any burn in a child under 5 or adult over 60; circumferential burns (wrapping around limb). Do NOT burst blisters — they protect against infection. Treat for shock if needed: keep person warm, lying down, legs elevated. Severe burns carry high risk of hypothermia — keep patient warm."
+  },
+  {
+    "id": "anaphylaxis_001",
+    "source": "anaphylaxis_protocol.pdf",
+    "page": 1,
+    "text": "Anaphylaxis recognition: Rapid onset (minutes) of: skin or mucosal changes (hives, flushing, swollen lips/tongue/throat) PLUS at least one of: respiratory compromise (wheeze, stridor, difficulty breathing) or circulatory collapse (weak rapid pulse, drop in blood pressure, loss of consciousness). Common triggers: foods (peanut, tree nuts, shellfish, dairy), insect stings, medications (penicillin, NSAIDs), latex. Act immediately — anaphylaxis is life-threatening. Epinephrine (adrenaline) is the only first-line treatment — antihistamines alone are NOT adequate."
+  },
+  {
+    "id": "anaphylaxis_002",
+    "source": "anaphylaxis_protocol.pdf",
+    "page": 2,
+    "text": "Anaphylaxis treatment: Administer epinephrine auto-injector (EpiPen) into outer mid-thigh — can be given through clothing. Hold for 10 seconds, then massage site for 10 seconds. Call 911 immediately even after EpiPen — biphasic reactions can occur up to 72 hours later. Position: lay person flat with legs raised unless difficulty breathing — then sit upright. Give second dose of epinephrine after 5–15 minutes if no improvement or symptoms return. If unconscious and not breathing, begin CPR. Do not give antihistamines as substitute for epinephrine. All anaphylaxis patients must go to hospital regardless of apparent recovery."
+  },
+  {
+    "id": "head_injury_001",
+    "source": "head_injury_protocol.pdf",
+    "page": 1,
+    "text": "Head injury — concussion signs: Headache, dizziness, confusion, memory loss (cannot recall event), nausea or vomiting, balance problems, sensitivity to light or noise, feeling 'foggy'. For minor bumps without loss of consciousness: apply cold compress for 20 minutes, monitor for 24 hours. Do NOT return to sport, drive, or make important decisions for 24 hours minimum. Wake every 2 hours if sleeping. Call 911 or go to emergency if: loss of consciousness (any duration), seizure, repeated vomiting (more than twice), unequal pupils, clear fluid from nose or ears, weakness or numbness in limbs, worsening headache, confusion lasting more than 1 hour."
+  },
+  {
+    "id": "head_injury_002",
+    "source": "head_injury_protocol.pdf",
+    "page": 2,
+    "text": "Head injury with suspected spinal involvement: If person fell from height, was in vehicle accident, or has head injury with neck pain — assume spinal injury. Do NOT move the person unless in immediate danger. Manually stabilise the head and neck in the position found — do NOT attempt to straighten. Call 911 immediately. If person is unconscious and not breathing, airway takes priority over spinal precautions — jaw thrust preferred over head-tilt. If person vomits, log-roll as a unit keeping spine aligned. Monitor breathing and consciousness continuously."
+  },
+  {
+    "id": "shock_001",
+    "source": "shock_management.pdf",
+    "page": 1,
+    "text": "Shock recognition and management: Signs: pale, cold, clammy skin; rapid weak pulse (over 100 bpm); rapid shallow breathing; confusion, anxiety, or restlessness; dizziness or fainting; nausea; decreased urine output. Types: Hypovolaemic (blood/fluid loss), anaphylactic, cardiogenic, septic, neurogenic. General management: call 911 immediately. Lay person flat, elevate legs 30 cm unless head injury or breathing difficulty suspected. Keep warm — cover with blanket, insulate from cold ground. Do NOT give food or water. Treat underlying cause: control bleeding, give EpiPen for anaphylaxis. Monitor and record vital signs every 5 minutes. Prepare for CPR."
+  },
+  {
+    "id": "chest_pain_001",
+    "source": "cardiac_emergencies.pdf",
+    "page": 1,
+    "text": "Chest pain — possible heart attack: Symptoms: central crushing or squeezing chest pain, may radiate to left arm, jaw, back, or stomach; shortness of breath; sweating; nausea; feeling of impending doom. Call 911 immediately — do not drive yourself. Have person sit or lie in most comfortable position (typically half-sitting). Give 300 mg aspirin to chew (not swallow whole) if not allergic and no contraindications — aspirin inhibits further clot formation. Loosen tight clothing. Do NOT give food, water, or alcohol. Monitor breathing; be ready to start CPR. Women may present atypically — fatigue, jaw pain, nausea without classic chest pain."
+  },
+  {
+    "id": "hypothermia_001",
+    "source": "environmental_emergencies.pdf",
+    "page": 1,
+    "text": "Hypothermia (core temp below 35°C): Mild (32–35°C): shivering, impaired coordination, slurred speech, confusion. Severe (below 32°C): shivering stops, muscle stiffness, very slow pulse and breathing, unconsciousness. Treatment: Move to warm dry environment. Remove wet clothing gently — rough handling can trigger ventricular fibrillation. Insulate from ground. Apply heat to armpits, groin, and neck — NOT to extremities first (drives cold blood to core). Warm fluids by mouth only if conscious and able to swallow. Do NOT rub limbs. Severe hypothermia: handle extremely gently. 'Not dead until warm and dead' — a person may have no detectable pulse but be resuscitable after rewarming. Do not give alcohol."
+  },
+  {
+    "id": "diabetic_emergency_001",
+    "source": "medical_emergencies.pdf",
+    "page": 1,
+    "text": "Diabetic emergency — hypoglycaemia (low blood sugar): Signs: sudden confusion, shaking, sweating, pallor, aggression, hunger, headache, dizziness, loss of consciousness. If conscious and able to swallow: give 15–20 g fast-acting glucose — 4 glucose tablets, 150 ml fruit juice, or 5 jelly beans. Wait 15 minutes; repeat if symptoms persist. Follow with complex carbohydrate snack once stable. If unconscious or unable to swallow: do NOT give anything by mouth. Call 911. Place in recovery position. If trained: administer glucagon injection per prescription. Never leave alone. Symptoms may mimic alcohol intoxication — always check for medical alert bracelet."
+  },
+  {
+    "id": "spinal_injury_001",
+    "source": "trauma_protocols.pdf",
+    "page": 1,
+    "text": "Suspected spinal injury: Mechanism of injury suggesting spinal involvement: fall from height greater than standing, diving injury, high-speed vehicle accident, direct blow to spine, sports collision. Do NOT move unless immediate life threat. Maintain inline immobilisation — stabilise head and neck in position found. If person must be moved (fire, water, ongoing danger): log-roll as a unit keeping ears aligned with shoulders. Airway takes priority over spinal precautions: if not breathing, use jaw-thrust manoeuvre rather than head-tilt. Call 911 immediately. Monitor and document: movement and sensation in all four limbs, level of consciousness, breathing pattern."
+  },
+  {
+    "id": "drowning_001",
+    "source": "water_rescue.pdf",
+    "page": 1,
+    "text": "Drowning rescue and resuscitation: Do NOT enter water unless trained in water rescue — you risk becoming a victim. Throw a rope, extend a pole, or use a flotation device. Once person is on solid ground: call 911. Check responsiveness. If not breathing normally, begin rescue breaths immediately — open airway, give 5 initial rescue breaths. Then begin standard CPR 30:2. Do NOT delay CPR to drain water from lungs. Hypothermia is common — begin active rewarming while continuing resuscitation. All drowning victims require hospital assessment even if apparently recovered — secondary drowning can occur up to 24 hours later."
+  },
+  {
+    "id": "overdose_001",
+    "source": "toxicological_emergencies.pdf",
+    "page": 1,
+    "text": "Opioid overdose recognition and response: Signs: unconscious or unresponsive, very slow or stopped breathing (less than 1 breath per 8 seconds), blue or grey lips and fingertips, pinpoint pupils, gurgling or snoring sounds. Call 911. Administer naloxone (Narcan) if available: intranasal dose 4 mg in one nostril, or IM injection 0.4 mg in outer thigh. May repeat after 2–3 minutes if no response. If not breathing, begin rescue breaths — naloxone alone may not be sufficient. Place in recovery position when breathing resumes. Stay until EMS arrives — naloxone wears off in 30–90 minutes and person can relapse into overdose. Do NOT leave alone."
+  },
+  {
+    "id": "eye_injury_001",
+    "source": "minor_injuries.pdf",
+    "page": 1,
+    "text": "Eye injuries: Chemical splash: immediately flush with large amounts of clean water for 20 minutes continuously. Hold eyelids open. Remove contact lenses if possible before flushing. Call 911 or go to emergency. Foreign body in eye: do NOT rub eye. Blink rapidly and allow tears to flush object. Gently flush with clean water or saline. If object is embedded or stuck on surface, cover eye with clean cup or dressing — do NOT apply pressure. Blunt trauma: apply cold compress wrapped in cloth for 20 minutes. Go to emergency if: vision changes, severe pain, blood visible in eye, pupil irregular. Penetrating eye injury: cover loosely, do NOT apply pressure, go to emergency immediately."
+  },
+  {
+    "id": "fracture_001",
+    "source": "musculoskeletal_injuries.pdf",
+    "page": 1,
+    "text": "Suspected fracture management: Signs: pain, swelling, deformity, inability to bear weight or use limb, bruising, unnatural movement. Do NOT attempt to straighten or realign fracture. Immobilise in position found using padding and splinting — improvise with boards, rolled clothing, or magazines. Check circulation, sensation, and movement below the injury before and after splinting. Elevate injured limb if no spinal injury suspected. Apply ice wrapped in cloth to reduce swelling — not directly on skin. Open (compound) fracture: do NOT push bone back in. Cover with clean dressing and seek emergency care. Femur fracture can cause 1–2 litres blood loss internally — monitor for shock."
+  },
+  {
+    "id": "tccc_march_001",
+    "source": "tccc_guidelines_2024.pdf",
+    "page": 1,
+    "text": "TCCC MARCH protocol — gunshot wound, penetrating trauma, tactical field care: M — Massive hemorrhage: identify and control life-threatening bleeding from gunshot or penetrating wound first. Apply tourniquet high and tight on limb or wound pack with haemostatic gauze. A — Airway: unconscious casualty — jaw thrust, nasopharyngeal airway if available, recovery position. Penetrating neck trauma — occlusive dressing. R — Respiration: assess breathing. Tension pneumothorax — needle decompression at second intercostal space midclavicular or fourth intercostal space anterior axillary line. Sucking chest wound — vented chest seal. C — Circulation: IV/IO access, 1L Lactated Ringer's if hypotensive and no TBI. H — Hypothermia: remove wet clothing, wrap in heat-reflecting blanket, avoid cold IV fluids."
+  },
+  {
+    "id": "tccc_hemorrhage_001",
+    "source": "tccc_guidelines_2024.pdf",
+    "page": 3,
+    "text": "TCCC haemorrhage control sequence: 1. Direct pressure with gloved hand — assess bleed category. 2. Limb arterial bleed: tourniquet as proximate as possible to wound. 3. Junctional bleed (groin, axilla, neck): wound packing with Combat Gauze pressed into wound base, 3-minute manual pressure. 4. Internal torso bleed: no field-expedient control — rapid evacuation priority. TXA (Tranexamic Acid): 1g IV/IO within 3 hours of injury, second 1g over 8 hours. Do NOT give TXA more than 3 hours after injury — may increase mortality. Haemostatic gauze preferred over plain gauze for all penetrating trauma. Reassess tourniquet effectiveness every 10 minutes."
+  }
+]
