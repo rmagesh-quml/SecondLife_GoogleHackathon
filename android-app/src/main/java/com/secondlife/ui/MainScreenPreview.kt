@@ -15,9 +15,10 @@ private fun fakeSession(role: String = "layperson") = EmergencySession(
         TranscriptTurn(
             userText = "Patient is unresponsive, no pulse",
             response = SecondLifeResponse(
-                role     = role,
-                response = "1. Call 911 immediately\n2. Begin chest compressions\n3. Push hard and fast — 2 inches deep at 100-120 bpm",
-                keyTerms = listOf("chest compressions", "911"),
+                role      = role,
+                response  = "1. Call 911 immediately\n2. Begin chest compressions\n3. Push hard and fast — 2 inches deep at 100-120 bpm",
+                citation  = "AHA Guidelines, 2020",
+                latencyMs = 312L,
             ),
         )
     ),
