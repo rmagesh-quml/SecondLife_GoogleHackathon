@@ -4,6 +4,7 @@ import android.app.Application
 import android.graphics.Bitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -26,6 +27,9 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error
 
+    // Track the active query so we can cancel it on newEmergency() / setRole()
+    private var activeQueryJob: Job? = null
+
     init {
         viewModelScope.launch { session.initModel() }
     }
@@ -40,14 +44,28 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
 
     fun query(text: String, audio: Any? = null) {
         val image = _capturedImage.value   // snapshot — include whatever is staged
-        viewModelScope.launch {
+        activeQueryJob?.cancel()
+        activeQueryJob = viewModelScope.launch {
             session.respond(text, audio = audio, image = image)
             // Keep image staged so judges can see it; user taps × to clear
         }
     }
 
     fun setRole(role: String) {
+        // Cancel any in-flight query so it can't overwrite the new context
+        activeQueryJob?.cancel()
+        session.resetConversation()
         session.currentRole = role
+        session.clearResponse()
+    }
+
+    /** Start fresh — new emergency, wipe context, clear image and response. */
+    fun newEmergency() {
+        // Cancel in-flight query first — prevents old response bleeding into new session
+        activeQueryJob?.cancel()
+        session.resetConversation()
+        session.clearResponse()
+        _capturedImage.value = null
     }
 
     fun verifyAuditChain(): Boolean = session.verifyAuditChain()
