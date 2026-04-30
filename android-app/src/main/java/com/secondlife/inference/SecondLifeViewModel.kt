@@ -1,35 +1,60 @@
 package com.secondlife.inference
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.io.File
 
-class SecondLifeViewModel : ViewModel() {
+class SecondLifeViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val _response = MutableStateFlow<SecondLifeResponse?>(null)
-    val response: StateFlow<SecondLifeResponse?> = _response
+    private val modelPath: String = determineModelPath()
+    private val protocolsPath: String? = determineProtocolsPath()
 
-    private val _isListening = MutableStateFlow(false)
-    val isListening: StateFlow<Boolean> = _isListening
+    private val session = InferenceSession(application, modelPath, protocolsPath)
 
-    private val _error = MutableStateFlow<String?>(null)
-    val error: StateFlow<String?> = _error
+    val response: StateFlow<SecondLifeResponse?> = session.response
+    val isLoading: StateFlow<Boolean> = session.isLoading
 
-    fun setListening(listening: Boolean) {
-        _isListening.value = listening
+    init {
+        viewModelScope.launch {
+            session.initModel()
+        }
     }
 
-    fun onInferenceResult(result: SecondLifeResponse) {
-        _response.value = result
+    fun query(text: String, audio: Any? = null, image: Any? = null) {
+        viewModelScope.launch {
+            session.respond(text, audio, image)
+        }
     }
 
-    fun onError(message: String) {
-        _error.value = message
+    fun setRole(role: String) {
+        session.currentRole = role
     }
 
-    fun clearError() {
-        _error.value = null
+    fun verifyAuditChain(): Boolean {
+        return session.verifyAuditChain()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        session.release()
+    }
+
+    private fun determineModelPath(): String {
+        val emulatorPath = "/data/local/tmp/gemma-4-E4B-it-web.task"
+        val devicePath = File(getApplication<Application>().filesDir, "gemma-4-E4B-it-web.task").absolutePath
+        
+        return if (File(emulatorPath).exists()) {
+            emulatorPath
+        } else {
+            devicePath
+        }
+    }
+
+    private fun determineProtocolsPath(): String? {
+        val path = File(getApplication<Application>().filesDir, "protocols.json").absolutePath
+        return if (File(path).exists()) path else null
     }
 }

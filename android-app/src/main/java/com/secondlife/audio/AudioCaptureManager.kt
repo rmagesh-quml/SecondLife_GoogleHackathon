@@ -10,16 +10,13 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.isActive
+import java.io.ByteArrayOutputStream
+import kotlin.math.sqrt
 
 /**
- * Captures PCM 16-bit 16kHz mono audio from the microphone.
- *
- * Contract (Rohan → Shravan):
- *   Emits ByteArray chunks of raw PCM — no WAV headers, no compression.
- *   Silence trimming is applied before emission.
- *
- * Usage:
- *   AudioCaptureManager(context).captureFlow().collect { pcmChunk -> ... }
+ * Contract → Shravan:
+ *   ByteArray — PCM signed 16-bit little-endian, 16 000 Hz, mono, no WAV headers.
+ *   Silent chunks are stripped before delivery (both Flow and captureUntilSilence).
  */
 class AudioCaptureManager(private val context: Context) {
 
@@ -27,11 +24,14 @@ class AudioCaptureManager(private val context: Context) {
         const val SAMPLE_RATE = 16_000
         const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
-        private const val SILENCE_THRESHOLD = 500  // amplitude units
+        var SILENCE_THRESHOLD = 200.0   // RMS amplitude; adjustable
     }
 
+    @Volatile private var recording = false
+
+    /** Push-to-talk flow API. Emits non-silent PCM chunks only. Completes when stopCapture() is called. */
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
-    fun captureFlow(): Flow<ByteArray> = callbackFlow {
+    fun startCapture(): Flow<ByteArray> = callbackFlow {
         val bufferSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
             .coerceAtLeast(4096)
 
@@ -42,18 +42,20 @@ class AudioCaptureManager(private val context: Context) {
             AUDIO_FORMAT,
             bufferSize
         )
+        check(recorder.state == AudioRecord.STATE_INITIALIZED) {
+            "AudioRecord failed to initialize — microphone may be in use"
+        }
 
+        recording = true
         recorder.startRecording()
 
         try {
-            while (isActive) {
+            while (isActive && recording) {
                 val buffer = ByteArray(bufferSize)
                 val read = recorder.read(buffer, 0, bufferSize)
                 if (read > 0) {
                     val chunk = buffer.copyOf(read)
-                    if (!isSilent(chunk)) {
-                        trySend(chunk)
-                    }
+                    if (rms(chunk) >= SILENCE_THRESHOLD) trySend(chunk)
                 }
             }
         } finally {
@@ -61,16 +63,78 @@ class AudioCaptureManager(private val context: Context) {
             recorder.release()
         }
 
-        awaitClose()
+        awaitClose { recording = false }
     }
 
-    private fun isSilent(pcm: ByteArray): Boolean {
-        var sum = 0L
-        for (i in pcm.indices step 2) {
-            val sample = ((pcm[i + 1].toInt() shl 8) or (pcm[i].toInt() and 0xFF)).toShort()
-            sum += Math.abs(sample.toInt())
+    fun stopCapture() {
+        recording = false
+    }
+
+    /**
+     * Records until the microphone has been silent for silenceMs milliseconds.
+     * Returns the accumulated PCM buffer with trailing silence stripped.
+     */
+    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
+    suspend fun captureUntilSilence(silenceMs: Long = 1500): ByteArray {
+        val bufferSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
+            .coerceAtLeast(4096)
+
+        val recorder = AudioRecord(
+            MediaRecorder.AudioSource.MIC,
+            SAMPLE_RATE,
+            CHANNEL_CONFIG,
+            AUDIO_FORMAT,
+            bufferSize
+        )
+        check(recorder.state == AudioRecord.STATE_INITIALIZED) {
+            "AudioRecord failed to initialize — microphone may be in use"
         }
-        val avg = sum / (pcm.size / 2)
-        return avg < SILENCE_THRESHOLD
+
+        val output = ByteArrayOutputStream()
+        // Accumulate trailing silent frames separately; discard them if silence holds.
+        val silenceBuffer = ByteArrayOutputStream()
+        var silenceStart = -1L
+        recorder.startRecording()
+
+        try {
+            while (true) {
+                val buffer = ByteArray(bufferSize)
+                val read = recorder.read(buffer, 0, bufferSize)
+                if (read <= 0) continue
+
+                val chunk = buffer.copyOf(read)
+
+                if (rms(chunk) < SILENCE_THRESHOLD) {
+                    if (silenceStart < 0) silenceStart = System.currentTimeMillis()
+                    silenceBuffer.write(chunk)  // stage silently
+                    if (System.currentTimeMillis() - silenceStart >= silenceMs) break
+                } else {
+                    // Non-silent: flush any staged silence back (mid-utterance pause)
+                    if (silenceBuffer.size() > 0) {
+                        output.write(silenceBuffer.toByteArray())
+                        silenceBuffer.reset()
+                    }
+                    silenceStart = -1L
+                    output.write(chunk)
+                }
+            }
+            // silenceBuffer is intentionally discarded — trailing silence stripped
+        } finally {
+            recorder.stop()
+            recorder.release()
+        }
+
+        return output.toByteArray()
+    }
+
+    private fun rms(pcm: ByteArray): Double {
+        val samples = pcm.size / 2
+        if (samples == 0) return 0.0
+        var sum = 0.0
+        for (i in 0 until samples) {
+            val sample = ((pcm[i * 2 + 1].toInt() shl 8) or (pcm[i * 2].toInt() and 0xFF)).toShort()
+            sum += sample.toDouble() * sample
+        }
+        return sqrt(sum / samples)
     }
 }
