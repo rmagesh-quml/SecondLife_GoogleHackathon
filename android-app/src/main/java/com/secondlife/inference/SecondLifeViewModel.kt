@@ -63,12 +63,24 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
 
     companion object {
         private fun resolveModelPath(app: Application): String {
-            val emulator = File("/data/local/tmp/gemma-4-E4B-it-web.task")
-            val device   = File(app.filesDir, "gemma-4-E4B-it-web.task")
-            return when {
-                emulator.exists() -> emulator.absolutePath
-                else              -> device.absolutePath
+            val names = listOf("gemma-4-E4B-it.litertlm", "gemma-4-E4B-it-web.task")
+            val dirs = listOf(
+                "/data/local/tmp/",
+                "/sdcard/Download/models/",
+                "/storage/emulated/0/Download/models/",
+                app.filesDir.absolutePath + "/"
+            )
+
+            for (dir in dirs) {
+                for (name in names) {
+                    val file = File(dir, name)
+                    if (file.exists()) {
+                        return file.absolutePath
+                    }
+                }
             }
+            // Fallback to default expected path
+            return File(app.filesDir, "gemma-4-E4B-it-web.task").absolutePath
         }
 
         private fun resolveProtocolsPath(app: Application): String? {
