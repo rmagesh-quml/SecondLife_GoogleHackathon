@@ -1,0 +1,32 @@
+# Model weights (large binaries, licensed)
+*.litertlm
+*.task
+*.tflite
+
+# Audit log (may contain patient data)
+audit_log.json
+
+# FAISS index (rebuilt locally from PDFs)
+ai-pipeline/rag/index/*
+!ai-pipeline/rag/index/.gitkeep
+
+# Intermediate chunks (rebuilt by pipeline)
+data/chunks/*
+!data/chunks/.gitkeep
+!data/chunks/protocols.json
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Android / Gradle
+.gradle/
+build/
+.idea/
+*.apk
+local.properties
+
+# macOS
+.DS_Store

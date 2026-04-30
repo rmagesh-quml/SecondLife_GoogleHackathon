@@ -1,0 +1,7 @@
+litert-lm
+faiss-cpu
+fastembed
+PyPDF2
+numpy
+Pillow
+pytest
