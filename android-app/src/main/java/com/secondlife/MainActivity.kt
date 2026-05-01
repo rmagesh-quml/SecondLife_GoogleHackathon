@@ -163,10 +163,16 @@ class MainActivity : ComponentActivity() {
             listOf(android.Manifest.permission.POST_NOTIFICATIONS)
         } else emptyList()
 
+        // NEARBY_WIFI_DEVICES is required by Nearby Connections on Android 13+.
+        // It was in the manifest but never requested at runtime — caused code 8029.
+        val nearbyWifiPermission = if (Build.VERSION.SDK_INT >= 33) {
+            listOf(android.Manifest.permission.NEARBY_WIFI_DEVICES)
+        } else emptyList()
+
         val needed = (listOf(
             Manifest.permission.RECORD_AUDIO,
             Manifest.permission.CAMERA,
-        ) + meshPermissions + notifPermission)
+        ) + meshPermissions + notifPermission + nearbyWifiPermission)
             .filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
         if (needed.isNotEmpty()) permLauncher.launch(needed.toTypedArray())
 
