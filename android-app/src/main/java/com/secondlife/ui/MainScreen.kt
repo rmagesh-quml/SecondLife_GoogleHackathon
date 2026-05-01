@@ -41,9 +41,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -70,6 +72,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -86,6 +89,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -957,8 +961,15 @@ private fun ProtocolCard(response: SecondLifeResponse, role: String, isActive: B
             Spacer(Modifier.height(12.dp))
 
             if (steps.isNotEmpty()) {
+                val checked = remember(steps.size) { mutableStateListOf(*Array(steps.size) { false }) }
                 steps.forEachIndexed { index, step ->
-                    StepRow(index = index + 1, text = step, accent = accent)
+                    StepRow(
+                        index   = index + 1,
+                        text    = step,
+                        accent  = accent,
+                        checked = checked[index],
+                        onToggle = { checked[index] = !checked[index] },
+                    )
                     if (index < steps.lastIndex) Spacer(Modifier.height(8.dp))
                 }
             } else {
@@ -980,28 +991,40 @@ private fun ProtocolCard(response: SecondLifeResponse, role: String, isActive: B
 }
 
 @Composable
-private fun StepRow(index: Int, text: String, accent: Color) {
-    Row(verticalAlignment = Alignment.Top) {
-        Box(
-            Modifier
-                .size(22.dp)
-                .clip(CircleShape)
-                .background(accent.copy(alpha = 0.18f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text  = index.toString(),
-                color = accent,
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
+private fun StepRow(
+    index: Int,
+    text: String,
+    accent: Color,
+    checked: Boolean = false,
+    onToggle: () -> Unit = {},
+) {
+    Row(
+        verticalAlignment = Alignment.Top,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable { onToggle() }
+            .padding(vertical = 2.dp),
+    ) {
+        // Animated checkbox icon
+        val iconTint = if (checked) accent else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+        Icon(
+            imageVector        = if (checked) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+            contentDescription = if (checked) "Done" else "Mark done",
+            tint               = iconTint,
+            modifier           = Modifier.size(22.dp),
+        )
         Spacer(Modifier.width(12.dp))
         Text(
-            text  = highlightKeyTerms(text),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(top = 1.dp),
+            text       = highlightKeyTerms(text),
+            style      = MaterialTheme.typography.bodyMedium.copy(
+                textDecoration = if (checked) TextDecoration.LineThrough else TextDecoration.None,
+            ),
+            color      = if (checked)
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+            else
+                MaterialTheme.colorScheme.onSurface,
+            modifier   = Modifier.padding(top = 1.dp),
         )
     }
 }
