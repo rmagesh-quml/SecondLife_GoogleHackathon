@@ -33,10 +33,9 @@ class MeshManager(
     private val TAG = "MeshManager"
     private val SERVICE_ID = "com.secondlife.emergency"
 
-    // P2P_STAR: one hub (Injured person), many spokes (Responders).
-    // This strategy is the most robust for range as it prioritizes 
-    // WiFi Direct and Bluetooth Classic over BLE when possible.
-    private val STRATEGY = Strategy.P2P_STAR
+    // P2P_CLUSTER: M-to-N discovery. Most resilient for mobile devices finding
+    // each other in unpredictable environments without a fixed hub.
+    private val STRATEGY = Strategy.P2P_CLUSTER
 
     private val connectionsClient by lazy { Nearby.getConnectionsClient(context) }
 
@@ -149,12 +148,11 @@ class MeshManager(
     // ── Broadcaster side (Person A — the injured person) ─────────────────────
 
     fun startBroadcasting(broadcast: EmergencyBroadcast) {
-        Log.d(TAG, "📡 SOS broadcast started [${broadcast.type}] — Bluetooth only, no internet")
+        Log.d(TAG, "📡 SOS broadcast starting [${broadcast.type}]...")
 
-        // Use high-power advertising for emergency speed.
         val options = AdvertisingOptions.Builder()
             .setStrategy(STRATEGY)
-            .setLowPower(false) // Use maximum radio power
+            .setLowPower(false)
             .build()
 
         connectionsClient.startAdvertising(
@@ -163,9 +161,9 @@ class MeshManager(
             connectionLifecycleCallback,
             options,
         ).addOnSuccessListener {
-            Log.d(TAG, "✅ SOS broadcasting active — any nearby SecondLife device will be alerted")
+            Log.d(TAG, "✅ SOS broadcasting active at HIGH power")
         }.addOnFailureListener { e ->
-            Log.w(TAG, "Advertising failed — is Bluetooth on? ${e.message}")
+            Log.e(TAG, "❌ Advertising failed: ${e.message}")
         }
     }
 
@@ -203,7 +201,7 @@ class MeshManager(
         Log.d(TAG, "🔍 BLE scan starting — listening for nearby SOS")
         val options = DiscoveryOptions.Builder()
             .setStrategy(STRATEGY)
-            .setLowPower(false) // Use maximum radio power
+            .setLowPower(false)
             .build()
 
         connectionsClient.startDiscovery(SERVICE_ID, endpointDiscoveryCallback, options)
@@ -215,12 +213,10 @@ class MeshManager(
                 _isScanActive = false
                 val code = (e as? com.google.android.gms.common.api.ApiException)?.statusCode
                 if (code == 8002) {
-                    // STATUS_ALREADY_DISCOVERING — scan is already running, nothing to do.
                     Log.d(TAG, "Already discovering — scan already active")
                     _isScanActive = true
                 } else {
-                    Log.e(TAG, "❌ BLE scan FAILED (code=$code): ${e.message}. " +
-                        "Is Bluetooth on? Location permission granted?")
+                    Log.e(TAG, "❌ BLE scan FAILED (code=$code): ${e.message}")
                 }
             }
     }
@@ -284,10 +280,12 @@ class MeshManager(
     }
 
     private fun decodeBroadcast(encoded: String): EmergencyBroadcast {
+        Log.d(TAG, "Decoding incoming SOS: $encoded")
         if (!encoded.startsWith("v1|")) {
             // Fallback for old JSON format if any still exist in the air
             return try {
                 val j = JSONObject(encoded)
+                Log.d(TAG, "Fallback JSON parse successful")
                 EmergencyBroadcast(
                     severity            = j.optInt("s", 3),
                     type                = j.optString("t", "other"),
@@ -299,11 +297,12 @@ class MeshManager(
                     broadcasterAccuracy = j.optDouble("ac", 0.0).toFloat(),
                 )
             } catch (e: Exception) {
+                Log.e(TAG, "SOS parse failed: $encoded")
                 throw Exception("Unknown SOS format: $encoded")
             }
         }
         val parts = encoded.split("|")
-        return EmergencyBroadcast(
+        val b = EmergencyBroadcast(
             severity            = parts.getOrNull(1)?.toIntOrNull() ?: 3,
             type                = parts.getOrNull(2) ?: "other",
             summary             = parts.getOrNull(3) ?: "Emergency assistance needed",
@@ -313,5 +312,7 @@ class MeshManager(
             broadcasterLng      = parts.getOrNull(7)?.toDoubleOrNull() ?: 0.0,
             broadcasterAccuracy = parts.getOrNull(8)?.toFloatOrNull() ?: 0f,
         )
+        Log.d(TAG, "SOS decoded successfully: ${b.type} from ${b.sessionId}")
+        return b
     }
 }

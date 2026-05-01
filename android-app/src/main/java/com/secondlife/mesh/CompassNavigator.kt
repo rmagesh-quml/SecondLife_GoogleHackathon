@@ -90,16 +90,16 @@ class CompassNavigator(private val context: Context) {
 
             val outMatrix = FloatArray(9)
             if (pitch > 45) {
-                // Vertical/Portrait holding: remap so top of phone is "Up" 
-                // and back of phone (camera) is "Forward"
+                // Vertical/Portrait holding: top of phone is "Up".
+                // Remap so Z (azimuth axis) points along the phone's Y axis.
                 SensorManager.remapCoordinateSystem(
                     rotMatrix,
                     SensorManager.AXIS_X,
-                    SensorManager.AXIS_MINUS_Z,
+                    SensorManager.AXIS_Z,
                     outMatrix
                 )
             } else {
-                // Flat/Table holding: default remapping (no change needed)
+                // Flat holding
                 System.arraycopy(rotMatrix, 0, outMatrix, 0, 9)
             }
             
