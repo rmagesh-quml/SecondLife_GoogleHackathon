@@ -78,6 +78,12 @@ class MeshManager(
                             connectedEndpoints.add(endpointId)
                             onResponderJoined(endpointId, connectedEndpoints.size)
                         }
+                        // An established BT connection proves both devices are physically
+                        // close. Nearby Connections doesn't expose raw RSSI, so use the
+                        // connection event itself as a "Very close" proximity signal.
+                        // This makes the compass show max warmth / "YOU'RE THERE" indoors
+                        // where GPS is unavailable.
+                        onRSSIUpdate(-45)
                     }
                     ConnectionsStatusCodes.STATUS_CONNECTION_REJECTED ->
                         Log.w(TAG, "Connection rejected by $endpointId")
@@ -96,6 +102,8 @@ class MeshManager(
                 Log.d(TAG, "Disconnected from $endpointId")
                 connectedEndpoints.remove(endpointId)
                 onResponderJoined(endpointId, connectedEndpoints.size)
+                // Drop back to scanning signal strength when no longer connected
+                if (connectedEndpoints.isEmpty()) onRSSIUpdate(-75)
             }
         }
 
