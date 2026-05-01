@@ -10,39 +10,84 @@ import androidx.core.app.NotificationCompat
 import com.secondlife.MainActivity
 
 object EmergencyNotificationManager {
-    private const val CHANNEL_ID = "secondlife_active"
-    private const val NOTIF_ID = 1001
+    private const val ACTIVE_CHANNEL_ID = "secondlife_active"
+    private const val ALERT_CHANNEL_ID  = "secondlife_alerts"
+    private const val NOTIF_ID_ACTIVE = 1001
+    private const val NOTIF_ID_ALERT  = 1002
 
-    fun createChannel(context: Context) {
+    fun createChannels(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
+            val nm = context.getSystemService(NotificationManager::class.java)
+            
+            // 1. Persistent background scanning channel
+            val activeChannel = NotificationChannel(
+                ACTIVE_CHANNEL_ID,
                 "SecondLife Active",
-                NotificationManager.IMPORTANCE_LOW,  // not intrusive
+                NotificationManager.IMPORTANCE_LOW,
             ).apply {
                 description = "Keeps SecondLife scanning for nearby emergencies"
                 setShowBadge(false)
             }
-            context.getSystemService(NotificationManager::class.java)
-                .createNotificationChannel(channel)
+            nm.createNotificationChannel(activeChannel)
+
+            // 2. High-priority emergency alert channel
+            val alertChannel = NotificationChannel(
+                ALERT_CHANNEL_ID,
+                "Emergency Alerts",
+                NotificationManager.IMPORTANCE_HIGH,
+            ).apply {
+                description = "Urgent SOS alerts from nearby people"
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 500, 200, 500)
+            }
+            nm.createNotificationChannel(alertChannel)
         }
     }
 
     fun showActive(context: Context) {
-        show(context, "SecondLife Active", "Scanning for nearby emergencies")
+        show(context, "SecondLife Active", "Scanning for nearby emergencies", NOTIF_ID_ACTIVE, ACTIVE_CHANNEL_ID, true)
     }
 
     fun showBroadcasting(context: Context, responderCount: Int) {
         val text = if (responderCount == 0) "🔴 Broadcasting SOS…"
         else "🔴 Broadcasting emergency · $responderCount responders"
-        show(context, "SecondLife Active", text)
+        show(context, "SecondLife Active", text, NOTIF_ID_ACTIVE, ACTIVE_CHANNEL_ID, true)
+    }
+
+    fun showAlert(context: Context, type: String, summary: String, endpointId: String) {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("EXTRA_AUTO_ACCEPT_ID", endpointId)
+        }
+        val pi = PendingIntent.getActivity(
+            context, 1, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        val notif = NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle("🚨 Nearby EMERGENCY: $type")
+            .setContentText(summary)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setVibrate(longArrayOf(0, 800, 200, 800))
+            .setFullScreenIntent(pi, true)
+            .setContentIntent(pi)
+            .setAutoCancel(true)
+            .build()
+
+        context.getSystemService(NotificationManager::class.java).notify(NOTIF_ID_ALERT, notif)
     }
 
     fun dismiss(context: Context) {
-        context.getSystemService(NotificationManager::class.java).cancel(NOTIF_ID)
+        context.getSystemService(NotificationManager::class.java).cancel(NOTIF_ID_ACTIVE)
     }
 
-    private fun show(context: Context, title: String, text: String) {
+    fun dismissAlert(context: Context) {
+        context.getSystemService(NotificationManager::class.java).cancel(NOTIF_ID_ALERT)
+    }
+
+    private fun show(context: Context, title: String, text: String, id: Int, channel: String, ongoing: Boolean) {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
@@ -50,15 +95,15 @@ object EmergencyNotificationManager {
             context, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val notif = NotificationCompat.Builder(context, CHANNEL_ID)
+        val notif = NotificationCompat.Builder(context, channel)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
             .setContentTitle(title)
             .setContentText(text)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setOngoing(true)
+            .setPriority(if (ongoing) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_HIGH)
+            .setOngoing(ongoing)
             .setContentIntent(pi)
-            .setAutoCancel(false)
+            .setAutoCancel(!ongoing)
             .build()
-        context.getSystemService(NotificationManager::class.java).notify(NOTIF_ID, notif)
+        context.getSystemService(NotificationManager::class.java).notify(id, notif)
     }
 }

@@ -68,6 +68,7 @@ class CompassNavigator(private val context: Context) {
     private var targetLocation: Location? = null
     private var lastUserLocation: Location? = null
     private var prevHeading = 0f
+    private var headingInitialized = false
     private var navigationActive = false
     private var declination = 0f
 
@@ -81,16 +82,26 @@ class CompassNavigator(private val context: Context) {
             
             SensorManager.getRotationMatrixFromVector(rotMatrix, event.values)
             
-            // Remap coordinate system to handle vertical/tilted device holding.
-            // This ensures "UP" on the screen (the Y axis) corresponds to the 
-            // horizontal forward direction regardless of how the phone is tilted.
+            // Check tilt: pitch is rotation around X axis.
+            // If phone is flat, pitch is 0. If vertical, pitch is 90.
+            val orientationTemp = FloatArray(3)
+            SensorManager.getOrientation(rotMatrix, orientationTemp)
+            val pitch = Math.abs(Math.toDegrees(orientationTemp[1].toDouble()))
+
             val outMatrix = FloatArray(9)
-            SensorManager.remapCoordinateSystem(
-                rotMatrix,
-                SensorManager.AXIS_X,
-                SensorManager.AXIS_Z,
-                outMatrix
-            )
+            if (pitch > 45) {
+                // Vertical/Portrait holding: remap so top of phone is "Up" 
+                // and back of phone (camera) is "Forward"
+                SensorManager.remapCoordinateSystem(
+                    rotMatrix,
+                    SensorManager.AXIS_X,
+                    SensorManager.AXIS_MINUS_Z,
+                    outMatrix
+                )
+            } else {
+                // Flat/Table holding: default remapping (no change needed)
+                System.arraycopy(rotMatrix, 0, outMatrix, 0, 9)
+            }
             
             SensorManager.getOrientation(outMatrix, orientation)
             val azimuth = Math.toDegrees(orientation[0].toDouble()).toFloat()
@@ -99,7 +110,7 @@ class CompassNavigator(private val context: Context) {
             // Apply declination to get True North heading
             val trueHeading = (magneticHeading + declination + 360) % 360
             
-            // Low-pass filter with wrap-around handling to prevent "spin-around" at North (0/360)
+            // Low-pass filter with wrap-around handling
             _heading.value = smoothHeading(trueHeading)
             recalcArrow()
         }
@@ -107,10 +118,15 @@ class CompassNavigator(private val context: Context) {
     }
 
     private fun smoothHeading(newHeading: Float): Float {
+        if (!headingInitialized) {
+            prevHeading = newHeading
+            headingInitialized = true
+            return newHeading
+        }
         var diff = newHeading - prevHeading
         while (diff > 180) diff -= 360
         while (diff < -180) diff += 360
-        prevHeading = (prevHeading + 0.25f * diff + 360) % 360 // Snappier response (0.25)
+        prevHeading = (prevHeading + 0.25f * diff + 360) % 360
         return prevHeading
     }
 
@@ -136,6 +152,7 @@ class CompassNavigator(private val context: Context) {
     fun startNavigation(targetLat: Double, targetLng: Double) {
         navigationActive = true
         prevHeading = 0f
+        headingInitialized = false
 
         // Always register the rotation sensor — works without any signal
         val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)

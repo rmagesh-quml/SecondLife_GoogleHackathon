@@ -12,80 +12,43 @@ import com.secondlife.emergency.ProtocolCardCache
 import com.secondlife.emergency.TimerState
 import com.secondlife.mesh.CompassNavigator
 import com.secondlife.mesh.MeshManager
+import com.secondlife.mesh.MeshService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
-/**
- * ViewModel that owns the list of [EmergencySession]s.
- *
- * ─── Backend gaps the UI cannot close on its own ──────────────────────────
- * The session list is purely UI-side. To make sessions feel "real" end-to-end
- * the backend would need:
- *   1. [InferenceSession.respond] to accept a session id (or a per-session
- *      Conversation) so two emergencies don't share a single live `_response`
- *      / `_isLoading` flow.
- *   2. The prompt builder to include prior-turn context for the active
- *      session (currently each call builds a fresh prompt with zero history,
- *      so the model has no per-session memory — only the UI does).
- *   3. The audit log chain to be partitioned by session id (currently a
- *      single global chain across all sessions).
- *   4. Persistence (Room / DataStore) so sessions survive process death.
- * None of these are touched by this PR — they are intentionally listed here
- * for whoever owns `ai-pipeline/` and the audit-log code.
- */
 class SecondLifeViewModel(application: Application) : AndroidViewModel(application) {
 
-    // Session is owned by SecondLifeApplication — never recreated on config changes.
     private val session = (application as com.secondlife.SecondLifeApplication).inferenceSession
 
     val isLoading:     StateFlow<Boolean> = session.isLoading
     val modelReady:    StateFlow<Boolean> = session.modelReady
     val streamingText: StateFlow<String>  = session.streamingText
 
-    // Captured camera frame — staged across queries until cleared.
     private val _capturedImage = MutableStateFlow<Bitmap?>(null)
     val capturedImage: StateFlow<Bitmap?> = _capturedImage.asStateFlow()
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
-    // Handoff report generated async — never blocks the emergency path.
     private val _handoffReport = MutableStateFlow<String?>(null)
     val handoffReport: StateFlow<String?> = _handoffReport.asStateFlow()
 
-    // Native timers / CPR metronome — all off the model path.
     val timerManager = EmergencyTimerManager(viewModelScope)
     val timerState:    StateFlow<TimerState?> = timerManager.timerState
     val metronomeBeat: StateFlow<Boolean>     = timerManager.metronomeBeat
 
     // ── Mesh ─────────────────────────────────────────────────────────────────
-    val meshManager = MeshManager(
-        context              = application,
-        onEmergencyReceived  = { broadcast, endpointId -> onEmergencyReceived(broadcast, endpointId) },
-        onResponderJoined    = { endpointId, count -> onResponderJoined(endpointId, count) },
-        onTaskReceived       = { task -> onTaskReceived(task) },
-        onRSSIUpdate         = { rssi -> onRSSIUpdate(rssi) },
-    )
+    private var meshService: MeshService? = null
 
-    // Compass navigator — guides Person B toward Person A
-    val navigator = CompassNavigator(application)
-
+    // Exposed flows for UI, backed by service data
     private val _isBroadcasting = MutableStateFlow(false)
     val isBroadcasting: StateFlow<Boolean> = _isBroadcasting.asStateFlow()
 
     private val _responderCount = MutableStateFlow(0)
     val responderCount: StateFlow<Int> = _responderCount.asStateFlow()
-
-    private val _responderTasks = MutableStateFlow<Map<String, String>>(emptyMap())
-    val responderTasks: StateFlow<Map<String, String>> = _responderTasks.asStateFlow()
 
     private val _nearbyEmergency = MutableStateFlow<MeshManager.EmergencyBroadcast?>(null)
     val nearbyEmergency: StateFlow<MeshManager.EmergencyBroadcast?> = _nearbyEmergency.asStateFlow()
@@ -93,24 +56,50 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
     private val _assignedTask = MutableStateFlow<String?>(null)
     val assignedTask: StateFlow<String?> = _assignedTask.asStateFlow()
 
-    // True once Person B has accepted a nearby emergency and is navigating
-    private val _isResponder = MutableStateFlow(false)
-    val isResponder: StateFlow<Boolean> = _isResponder.asStateFlow()
-
-    // The endpoint ID of the broadcaster — stored when Person B receives alert
     private val _pendingEndpointId = MutableStateFlow<String?>(null)
     val pendingEndpointId: StateFlow<String?> = _pendingEndpointId.asStateFlow()
 
+    private val _isResponder = MutableStateFlow(false)
+    val isResponder: StateFlow<Boolean> = _isResponder.asStateFlow()
+
+    private val _responderTasks = MutableStateFlow<Map<String, String>>(emptyMap())
+    val responderTasks: StateFlow<Map<String, String>> = _responderTasks.asStateFlow()
+
+    val navigator = CompassNavigator(application)
+
+    fun bindMeshService(service: MeshService) {
+        this.meshService = service
+        viewModelScope.launch {
+            service.nearbyEmergency.collect { _nearbyEmergency.emit(it) }
+        }
+        viewModelScope.launch {
+            service.pendingEndpointId.collect { _pendingEndpointId.emit(it) }
+        }
+        viewModelScope.launch {
+            service.responderCount.collect { _responderCount.emit(it) }
+        }
+        viewModelScope.launch {
+            service.isBroadcasting.collect { _isBroadcasting.emit(it) }
+        }
+        viewModelScope.launch {
+            service.assignedTask.collect { _assignedTask.emit(it) }
+        }
+        viewModelScope.launch {
+            service.rssi.collect { navigator.updateRSSI(it) }
+        }
+    }
+
+    private val meshManager get() = meshService?.meshManager 
+        ?: throw IllegalStateException("MeshService not bound")
+
     // ── Sessions ────────────────────────────────────────────────────────────
     private val initialSession = EmergencySession()
-
     private val _sessions = MutableStateFlow(listOf(initialSession))
     val sessions: StateFlow<List<EmergencySession>> = _sessions.asStateFlow()
 
     private val _activeSessionId = MutableStateFlow(initialSession.id)
     val activeSessionId: StateFlow<String> = _activeSessionId.asStateFlow()
 
-    // Derived flows: always read the active session's slice.
     val transcript: StateFlow<List<TranscriptTurn>> =
         _sessions.combine(_activeSessionId) { ss, id ->
             ss.firstOrNull { it.id == id }?.transcript ?: emptyList()
@@ -126,31 +115,10 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
             ss.firstOrNull { it.id == id }?.sessionStartedAt
         }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    // The latest completed response on the *active* session — drives TTS.
     val response: StateFlow<SecondLifeResponse?> =
         transcript.stateInMappedToResponse()
 
-    init {
-        // Model loading is started by SecondLifeApplication.onCreate() — nothing to do here.
-        // Always passively scan so Person B gets alerts automatically.
-        meshManager.startScanning()
-        // Restart scanning every 30 s — Nearby Connections can silently drop discovery
-        // after a few minutes, especially post-inference. This keeps the second phone
-        // reliably receiving broadcasts even if the first attempt failed or timed out.
-        viewModelScope.launch {
-            while (true) {
-                kotlinx.coroutines.delay(30_000L)
-                // Skip restart if broadcasting (Phone 1 must stay advertise-only — P2P_STAR
-                // breaks when the same device both advertises and discovers simultaneously)
-                // or if navigating as a responder.
-                if (!_isResponder.value && !_isBroadcasting.value) {
-                    meshManager.stopScanning()
-                    kotlinx.coroutines.delay(500L)
-                    meshManager.startScanning()
-                }
-            }
-        }
-    }
+    init {}
 
     // ── Camera ──────────────────────────────────────────────────────────────
     fun setCapturedImage(bitmap: Bitmap?) { _capturedImage.value = bitmap }
@@ -201,21 +169,16 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         session.currentMode = mode
     }
 
-    /** Exit the current session: clear timers and start a fresh one. */
     fun cancelSession() {
         timerManager.resetTimer()
         timerManager.stopMetronome()
         newSession()
     }
 
-    // ── Timer / metronome ────────────────────────────────────────────────────
     fun stopTimer()    = timerManager.stopTimer()
     fun resetTimer()   = timerManager.resetTimer()
     fun stopMetronome() = timerManager.stopMetronome()
 
-    // ── Handoff report ───────────────────────────────────────────────────────
-
-    /** Build a handoff report from the latest response. Call only on explicit user tap. */
     fun generateHandoffReport() {
         val r = response.value ?: return
         viewModelScope.launch {
@@ -239,13 +202,6 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
 
     fun dismissHandoffReport() { _handoffReport.value = null }
 
-    // ── Query ────────────────────────────────────────────────────────────────
-
-    /**
-     * Run a query on the *active* session. Captures the active id at dispatch
-     * time so switching sessions while the model is thinking still routes the
-     * response back to the originating session.
-     */
     fun query(text: String, audio: Any? = null) {
         if (text.isBlank()) return
         if (!session.modelReady.value) {
@@ -280,7 +236,6 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
                 )
             }
 
-            // Auto-start native timer for protocols that need one — no model involved.
             val protocolId = completed.protocolId?.let {
                 runCatching { EmergencyRouter.ProtocolId.valueOf(it) }.getOrNull()
             }
@@ -298,65 +253,21 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         super.onCleared()
         timerManager.release()
         session.release()
-        meshManager.release()
         navigator.stopNavigation()
     }
 
-    // ── Mesh callbacks (called from MeshManager on background thread) ────────
+    // ── Person A actions ──────────────────────────────────────────────────────
 
-    // Person B receives a nearby SOS — store it and show the alert screen.
-    private fun onEmergencyReceived(broadcast: MeshManager.EmergencyBroadcast, endpointId: String) {
-        viewModelScope.launch {
-            _pendingEndpointId.emit(endpointId)
-            _nearbyEmergency.emit(broadcast)
-        }
-    }
-
-    // Person A's side — a new responder has connected to our broadcast.
-    private fun onResponderJoined(endpointId: String, count: Int) {
-        viewModelScope.launch {
-            _responderCount.emit(count)
-            val task = meshManager.assignTask(count)
-            val current = _responderTasks.value.toMutableMap()
-            current[endpointId] = task
-            _responderTasks.emit(current)
-            meshManager.sendTaskAssignment(endpointId, task)
-        }
-    }
-
-    // Person B receives their assigned task from Person A's device.
-    private fun onTaskReceived(task: String) {
-        viewModelScope.launch { _assignedTask.emit(task) }
-    }
-
-    // RSSI update from Nearby — forward to compass navigator for distance label.
-    private fun onRSSIUpdate(rssi: Int) {
-        navigator.updateRSSI(rssi)
-    }
-
-    // ── Person A actions (broadcaster — the injured person) ───────────────────
-
-    /**
-     * Manually triggered by Person A after they get first-aid guidance.
-     * Packages their emergency info and broadcasts it to nearby devices.
-     */
     fun broadcastSos() {
         if (_isBroadcasting.value) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // CRITICAL: stop scanning before advertising.
-                // P2P_STAR (and even P2P_CLUSTER) cannot reliably run discovery
-                // and advertising simultaneously on the same device.
-                // Phone 1 must be ONLY an advertiser while broadcasting.
                 meshManager.stopScanning()
-                android.util.Log.i("SecondLifeVM", "Scanning stopped — starting SOS advertising")
-
                 val loc     = getLastKnownLocation()
                 val latest  = response.value
                 val summary = (latest?.steps?.take(2)?.joinToString(". ")
                                ?: latest?.response?.take(60)
                                ?: "Emergency — need help")
-                // Build the packet directly — no model call needed, faster + more reliable.
                 val packet = MeshManager.EmergencyBroadcast(
                     severity          = latest?.severity ?: 3,
                     type              = latest?.protocolId?.lowercase()?.replace("_", " ") ?: "emergency",
@@ -367,12 +278,9 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
                     broadcasterLng    = loc?.longitude ?: 0.0,
                     broadcasterAccuracy = loc?.accuracy ?: 0f,
                 )
-                android.util.Log.i("SecondLifeVM", "Broadcasting SOS packet: $packet")
                 meshManager.startBroadcasting(packet)
-                _isBroadcasting.emit(true)
+                meshService?.setIsBroadcasting(true)
             } catch (e: Exception) {
-                android.util.Log.e("SecondLifeVM", "broadcastSos FAILED: ${e.message}", e)
-                // If advertising failed, resume scanning so we don't lose both roles.
                 meshManager.startScanning()
                 postError("Could not start SOS broadcast — is Bluetooth on?")
             }
@@ -382,34 +290,26 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
     fun stopBroadcast() {
         meshManager.stopBroadcasting()
         viewModelScope.launch {
-            _isBroadcasting.emit(false)
+            meshService?.setIsBroadcasting(false)
             _responderCount.emit(0)
             _responderTasks.emit(emptyMap())
-            // Resume scanning now that we've stopped advertising.
             withContext(Dispatchers.IO) { meshManager.startScanning() }
         }
     }
 
-    // ── Person B actions (responder — the bystander going to help) ────────────
+    // ── Person B actions ──────────────────────────────────────────────────────
 
-    /**
-     * Person B taps "I'll Help". Start compass navigation toward Person A
-     * and join their Nearby session to receive task assignment.
-     */
     fun acceptEmergency() {
         val broadcast   = _nearbyEmergency.value ?: return
         val endpointId  = _pendingEndpointId.value ?: return
-        // Start compass pointing toward the broadcaster's GPS position
         navigator.startNavigation(broadcast.broadcasterLat, broadcast.broadcasterLng)
-        // Connect to Person A's Nearby session
         meshManager.joinSession(endpointId, broadcast.sessionId)
         viewModelScope.launch {
             _isResponder.emit(true)
-            _nearbyEmergency.emit(null)   // dismiss the alert — compass screen takes over
+            _nearbyEmergency.emit(null)
         }
     }
 
-    /** Person B dismisses the alert without helping. */
     fun dismissEmergency() {
         viewModelScope.launch {
             _nearbyEmergency.emit(null)
@@ -417,7 +317,6 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /** Person B has physically arrived at the scene. Stop navigation. */
     fun arrivedAtScene() {
         navigator.stopNavigation()
         viewModelScope.launch { _isResponder.emit(false) }
@@ -431,13 +330,8 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
 
     // ── Demo mode ──────────────────────────────────────────────────────────────
 
-    /**
-     * Phone 1 side: actually start advertising over BLE with a demo packet.
-     * Previously this only updated UI state — now it calls the real Nearby API.
-     */
     fun triggerDemoMesh() {
         viewModelScope.launch(Dispatchers.IO) {
-            // Stop scanning first — can't advertise and discover simultaneously.
             meshManager.stopScanning()
             val packet = MeshManager.EmergencyBroadcast(
                 severity          = 4,
@@ -449,16 +343,11 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
                 broadcasterLng    = 0.0,
                 broadcasterAccuracy = 0f,
             )
-            android.util.Log.i("SecondLifeVM", "Demo: starting REAL BLE broadcast")
             meshManager.startBroadcasting(packet)
-            _isBroadcasting.emit(true)
+            meshService?.setIsBroadcasting(true)
         }
     }
 
-    /**
-     * Phone 2 side: inject a fake incoming alert without needing BLE.
-     * Useful to test the alert UI when Bluetooth isn't available.
-     */
     fun triggerDemoIncomingAlert() {
         viewModelScope.launch {
             _pendingEndpointId.emit("demo_endpoint")
@@ -477,8 +366,6 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    // ── Location helper ───────────────────────────────────────────────────────
-
     @SuppressLint("MissingPermission")
     private suspend fun getLastKnownLocation(): android.location.Location? =
         try {
@@ -488,7 +375,6 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
             )
         } catch (e: Exception) { null }
 
-    // ── Internals ───────────────────────────────────────────────────────────
     private fun activeOrNull(): EmergencySession? =
         _sessions.value.firstOrNull { it.id == _activeSessionId.value }
 
@@ -504,5 +390,4 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
             }
         }
     }
-
 }

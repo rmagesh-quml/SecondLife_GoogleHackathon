@@ -45,6 +45,11 @@ import com.secondlife.ui.ResponderCompassScreen
 import com.secondlife.ui.theme.SecondLifeTheme
 import kotlinx.coroutines.launch
 
+import android.content.Intent
+import android.content.ServiceConnection
+import android.os.IBinder
+import com.secondlife.mesh.MeshService
+
 class MainActivity : ComponentActivity() {
 
     private val viewModel: SecondLifeViewModel by viewModels()
@@ -52,6 +57,19 @@ class MainActivity : ComponentActivity() {
     private lateinit var ttsManager:   TTSManager
     private lateinit var speechManager: SpeechManager
     private lateinit var cameraManager: CameraManager
+
+    // ── Mesh Service Binding ─────────────────────────────────────────────────
+    private var meshService: MeshService? = null
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: android.content.ComponentName?, service: IBinder?) {
+            val binder = service as? MeshService.MeshBinder
+            meshService = binder?.getService()
+            meshService?.let { viewModel.bindMeshService(it) }
+        }
+        override fun onServiceDisconnected(name: android.content.ComponentName?) {
+            meshService = null
+        }
+    }
 
     // ── Onboarding state (Activity-level so it survives recomposition) ───────
     private val prefs by lazy { getSharedPreferences("secondlife", Context.MODE_PRIVATE) }
@@ -116,6 +134,15 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Start and bind MeshService for background scanning
+        val serviceIntent = Intent(this, MeshService::class.java)
+        if (Build.VERSION.SDK_INT >= 26) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
+        bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+
         ttsManager    = TTSManager(this)
         speechManager = SpeechManager(this)
         cameraManager = CameraManager(this, this)
@@ -130,22 +157,16 @@ class MainActivity : ComponentActivity() {
         // Onboarding: read persisted flag
         showOnboarding = !prefs.getBoolean("onboarded", false)
 
-        // ── Notification setup ───────────────────────────────────────────────
-        EmergencyNotificationManager.createChannel(this)
-        // Show the persistent "active" notification after we have permission
-        EmergencyNotificationManager.showActive(this)
+        // Handle incoming intent (e.g. from notification)
+        handleIntent(intent)
 
+        // ── Notification setup ───────────────────────────────────────────────
+        EmergencyNotificationManager.createChannels(this)
+        
         // Observe broadcasting state → update notification
         lifecycleScope.launch {
             viewModel.isBroadcasting.collect { broadcasting ->
-                if (broadcasting) {
-                    EmergencyNotificationManager.showBroadcasting(
-                        this@MainActivity,
-                        viewModel.responderCount.value,
-                    )
-                } else {
-                    EmergencyNotificationManager.showActive(this@MainActivity)
-                }
+                // MeshService handles the notification updates now
             }
         }
 
@@ -314,8 +335,29 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent) {
+        val autoAcceptId = intent.getStringExtra("EXTRA_AUTO_ACCEPT_ID")
+        if (autoAcceptId != null) {
+            lifecycleScope.launch {
+                // Wait for mesh service to be bound if needed
+                while (meshService == null) {
+                    kotlinx.coroutines.delay(100)
+                }
+                // Dismiss the background alert notification now that we are in-app
+                EmergencyNotificationManager.dismissAlert(this@MainActivity)
+                viewModel.acceptEmergency()
+            }
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
+        unbindService(serviceConnection)
         if (::ttsManager.isInitialized)    ttsManager.release()
         if (::speechManager.isInitialized) speechManager.destroy()
         if (::cameraManager.isInitialized) cameraManager.release()
