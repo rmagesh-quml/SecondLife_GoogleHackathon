@@ -152,15 +152,32 @@ class InferenceSession(
             val prefs = context.getSharedPreferences("inference_prefs", android.content.Context.MODE_PRIVATE)
             val gpuFailed = prefs.getBoolean("gpu_init_failed", false)
 
+            // nativeLibraryDir gives the NPU backend the path to QNN/Hexagon DSP .so files.
+            val nativeLibDir = context.applicationInfo.nativeLibraryDir
+
+            // ── Backend priority ladder ────────────────────────────────────────
+            // 1. Hexagon NPU  — Qualcomm NPU via LiteRT-LM Backend.NPU.
+            //                   No VRAM risk (uses DSP memory); safe to always try first.
+            //                   On Snapdragon 8 Elite this is the Hexagon v79 DSP cluster.
+            // 2. GpuArtisan   — Samsung Artisan AI (Adreno 830 on S25 Ultra).
+            // 3. GPU(OpenCL)  — Standard Adreno OpenCL path.
+            // 4. CPU(8T)      — Guaranteed fallback; memory-mapped, never OOMs.
+            //
+            // GPU candidates are skipped if a previous run was OOM-killed (SIGKILL).
+            // NPU is never skipped — DSP memory is separate from LPDDR5X and cannot OOM the GPU pool.
+            val allCandidates = listOf(
+                Candidate(Backend.NPU(nativeLibDir), Backend.NPU(nativeLibDir), 2048, "Hexagon NPU"),
+                Candidate(Backend.GpuArtisan(),      Backend.GpuArtisan(),      2048, "GpuArtisan"),
+                Candidate(Backend.GPU(),             Backend.GPU(),             2048, "GPU(OpenCL)"),
+                Candidate(Backend.CPU(numOfThreads = 8), Backend.CPU(numOfThreads = 4), 4096, "CPU(8T)"),
+            )
+
             val candidates = if (gpuFailed) {
-                android.util.Log.w("InferenceSession", "GPU previously failed — starting directly on CPU(8T)")
-                listOf(Candidate(Backend.CPU(numOfThreads = 8), Backend.CPU(numOfThreads = 4), 4096, "CPU(8T)"))
+                android.util.Log.w("InferenceSession", "GPU previously OOM — trying NPU then CPU")
+                // NPU is still safe even if GPU OOMed — keep it in the ladder
+                listOf(allCandidates[0], allCandidates[3])
             } else {
-                listOf(
-                    Candidate(Backend.GpuArtisan(), Backend.GpuArtisan(), 2048, "GpuArtisan"),
-                    Candidate(Backend.GPU(),        Backend.GPU(),        2048, "GPU(OpenCL)"),
-                    Candidate(Backend.CPU(numOfThreads = 8), Backend.CPU(numOfThreads = 4), 4096, "CPU(8T)"),
-                )
+                allCandidates
             }
 
             // Mark GPU as in-progress before we try it. If the process is killed
@@ -183,8 +200,13 @@ class InferenceSession(
                     e.initialize()
                     engine = e
                     _activeBackend.value = candidate.label
-                    // GPU succeeded — clear the failure flag so next launch tries GPU again
+                    // Clear GPU-failed flag on any successful init
                     prefs.edit().putBoolean("gpu_init_failed", false).apply()
+                    if (candidate.label == "Hexagon NPU") {
+                        android.util.Log.i("SECONDLIFE_BACKEND", "⚡ Backend initialized: Hexagon NPU — Qualcomm DSP active")
+                    } else {
+                        android.util.Log.i("SECONDLIFE_BACKEND", "Backend initialized: ${candidate.label}")
+                    }
                     android.util.Log.i("InferenceSession", "✅ ${candidate.label} initialised — model ready!")
                     initialized = true
                     break

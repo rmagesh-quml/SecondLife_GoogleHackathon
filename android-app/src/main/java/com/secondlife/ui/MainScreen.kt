@@ -497,6 +497,7 @@ fun MainScreenContent(
                     signalLabel    = state.signalLabel,
                     role           = state.role,
                     sessionCount   = state.sessions.size,
+                    activeBackend  = state.activeBackend,
                     onMenuClick    = callbacks.onMenuOpen,
                     onRoleSelected = callbacks.onRoleChange,
                 )
@@ -632,66 +633,102 @@ private fun StatusRow(
     signalLabel:    String,
     role:           String,
     sessionCount:   Int,
+    activeBackend:  String,
     onMenuClick:    () -> Unit,
     onRoleSelected: (String) -> Unit,
 ) {
     val ext = LocalSecondLifeColors.current
-    Row(
-        Modifier.fillMaxWidth(),
-        verticalAlignment     = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        // Left cluster: hamburger + on-device pill
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .clickable(onClick = onMenuClick),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Default.Menu,
-                    contentDescription = "Open emergencies",
-                    tint               = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier           = Modifier.size(20.dp),
-                )
-                if (sessionCount > 1) {
+
+    // Backend chip config — judges see this immediately
+    val (backendLabel, backendColor) = when {
+        activeBackend.contains("NPU", ignoreCase = true) ||
+        activeBackend.contains("Hexagon", ignoreCase = true) ->
+            "⚡ Hexagon NPU" to Color(0xFF34C759)          // green
+        activeBackend.contains("Gpu", ignoreCase = true) ||
+        activeBackend.contains("GPU", ignoreCase = true) ->
+            "🔲 GPU" to Color(0xFFFFCC00)                  // yellow
+        activeBackend.contains("CPU", ignoreCase = true) ->
+            "⚠️ CPU" to Color(0xFFFF3B30)                  // red
+        else ->
+            "◌ Init…" to MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment     = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            // Left cluster: hamburger + on-device pill
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .clickable(onClick = onMenuClick),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Default.Menu,
+                        contentDescription = "Open emergencies",
+                        tint               = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier           = Modifier.size(20.dp),
+                    )
+                    if (sessionCount > 1) {
+                        Box(
+                            Modifier
+                                .align(Alignment.TopEnd)
+                                .size(8.dp)
+                                .clip(CircleShape)
+                                .background(ext.accentGreen)
+                        )
+                    }
+                }
+                Spacer(Modifier.width(4.dp))
+                // On-device status pill
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(50))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                ) {
                     Box(
                         Modifier
-                            .align(Alignment.TopEnd)
                             .size(8.dp)
                             .clip(CircleShape)
-                            .background(ext.accentGreen)
+                            .background(if (isOnDevice) ext.accentGreen else ext.textMuted)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text  = if (isOnDevice) "On-device · $signalLabel" else signalLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Spacer(Modifier.width(6.dp))
+                // Backend chip — prominently shows NPU/GPU/CPU to judges
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(backendColor.copy(alpha = 0.15f))
+                        .border(1.dp, backendColor.copy(alpha = 0.6f), RoundedCornerShape(50))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        text  = backendLabel,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = backendColor,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
                     )
                 }
             }
-            Spacer(Modifier.width(4.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(MaterialTheme.colorScheme.surface)
-                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(50))
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-            ) {
-                Box(
-                    Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(if (isOnDevice) ext.accentGreen else ext.textMuted)
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text  = if (isOnDevice) "On-device · $signalLabel" else signalLabel,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
 
-        // Right: role badge with dropdown
-        RoleSelector(role = role, onRoleSelected = onRoleSelected)
+            // Right: role badge with dropdown
+            RoleSelector(role = role, onRoleSelected = onRoleSelected)
+        }
     }
 }
 
