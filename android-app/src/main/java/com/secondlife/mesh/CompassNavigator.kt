@@ -6,6 +6,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.hardware.GeomagneticField
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -65,8 +66,10 @@ class CompassNavigator(private val context: Context) {
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
     private var targetLocation: Location? = null
+    private var lastUserLocation: Location? = null
     private var prevHeading = 0f
     private var navigationActive = false
+    private var declination = 0f
 
     // ── Sensor listener — rotation vector → compass heading ──────────────────
 
@@ -75,16 +78,40 @@ class CompassNavigator(private val context: Context) {
             if (event.sensor.type != Sensor.TYPE_ROTATION_VECTOR) return
             val rotMatrix = FloatArray(9)
             val orientation = FloatArray(3)
+            
             SensorManager.getRotationMatrixFromVector(rotMatrix, event.values)
-            SensorManager.getOrientation(rotMatrix, orientation)
+            
+            // Remap coordinate system to handle vertical/tilted device holding.
+            // This ensures "UP" on the screen (the Y axis) corresponds to the 
+            // horizontal forward direction regardless of how the phone is tilted.
+            val outMatrix = FloatArray(9)
+            SensorManager.remapCoordinateSystem(
+                rotMatrix,
+                SensorManager.AXIS_X,
+                SensorManager.AXIS_Z,
+                outMatrix
+            )
+            
+            SensorManager.getOrientation(outMatrix, orientation)
             val azimuth = Math.toDegrees(orientation[0].toDouble()).toFloat()
-            val normalised = (azimuth + 360) % 360
-            // Low-pass filter: smooths jitter without adding noticeable lag
-            prevHeading = prevHeading * 0.85f + normalised * 0.15f
-            _heading.value = prevHeading
+            val magneticHeading = (azimuth + 360) % 360
+            
+            // Apply declination to get True North heading
+            val trueHeading = (magneticHeading + declination + 360) % 360
+            
+            // Low-pass filter with wrap-around handling to prevent "spin-around" at North (0/360)
+            _heading.value = smoothHeading(trueHeading)
             recalcArrow()
         }
         override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {}
+    }
+
+    private fun smoothHeading(newHeading: Float): Float {
+        var diff = newHeading - prevHeading
+        while (diff > 180) diff -= 360
+        while (diff < -180) diff += 360
+        prevHeading = (prevHeading + 0.25f * diff + 360) % 360 // Snappier response (0.25)
+        return prevHeading
     }
 
     // ── Location callback (Fused — prefers GPS, no network needed) ───────────
@@ -131,6 +158,15 @@ class CompassNavigator(private val context: Context) {
             latitude  = targetLat
             longitude = targetLng
         }
+
+        // Set initial declination based on target location so compass is 
+        // relatively accurate even before we get our first own GPS fix.
+        declination = GeomagneticField(
+            targetLat.toFloat(),
+            targetLng.toFloat(),
+            0f,
+            System.currentTimeMillis()
+        ).declination
 
         // Try FusedLocationProviderClient first — uses GPS satellite, no internet
         try {
@@ -188,7 +224,18 @@ class CompassNavigator(private val context: Context) {
 
     private fun updateFromLocation(loc: Location) {
         if (!navigationActive) return
+        lastUserLocation = loc
         val target = targetLocation ?: return
+        
+        // Update declination for the current location (True North vs Magnetic North)
+        val field = GeomagneticField(
+            loc.latitude.toFloat(),
+            loc.longitude.toFloat(),
+            loc.altitude.toFloat(),
+            loc.time
+        )
+        declination = field.declination
+
         _bearing.value        = loc.bearingTo(target)
         _distanceMeters.value = loc.distanceTo(target)
         _isGpsAvailable.value = true

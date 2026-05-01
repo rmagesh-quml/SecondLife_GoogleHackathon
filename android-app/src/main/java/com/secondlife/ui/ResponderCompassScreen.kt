@@ -71,10 +71,14 @@ fun ResponderCompassScreen(
             )
 
             // ── Main finder widget ────────────────────────────────────────────
-            if (isGpsAvailable && distanceMeters != null) {
+            if (isGpsAvailable && distanceMeters != null && distanceMeters > 8f) {
                 GpsCompass(arrowRotation = arrowRotation, distanceMeters = distanceMeters)
             } else {
-                RssiSignalFinder(rssiLabel = rssiLabel)
+                // If GPS is unavailable OR we are within 8m (where GPS is too jittery),
+                // switch to Bluetooth RSSI mode which is much more precise for close-range.
+                val title = if (distanceMeters != null && distanceMeters <= 8f) 
+                    "YOU ARE VERY CLOSE" else rssiLabel
+                RssiSignalFinder(rssiLabel = title)
             }
 
             // ── Assigned task card ────────────────────────────────────────────
