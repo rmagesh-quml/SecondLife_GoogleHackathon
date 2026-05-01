@@ -33,9 +33,10 @@ class MeshManager(
     private val TAG = "MeshManager"
     private val SERVICE_ID = "com.secondlife.emergency"
 
-    // P2P_CLUSTER: any-to-any discovery. More robust for mobile devices finding
-    // each other in unpredictable environments.
-    private val STRATEGY = Strategy.P2P_CLUSTER
+    // P2P_STAR: one hub (Injured person), many spokes (Responders).
+    // This strategy is the most robust for range as it prioritizes 
+    // WiFi Direct and Bluetooth Classic over BLE when possible.
+    private val STRATEGY = Strategy.P2P_STAR
 
     private val connectionsClient by lazy { Nearby.getConnectionsClient(context) }
 
@@ -153,7 +154,7 @@ class MeshManager(
         // Use high-power advertising for emergency speed.
         val options = AdvertisingOptions.Builder()
             .setStrategy(STRATEGY)
-            .setLowPower(false)
+            .setLowPower(false) // Use maximum radio power
             .build()
 
         connectionsClient.startAdvertising(
@@ -202,7 +203,7 @@ class MeshManager(
         Log.d(TAG, "🔍 BLE scan starting — listening for nearby SOS")
         val options = DiscoveryOptions.Builder()
             .setStrategy(STRATEGY)
-            .setLowPower(false)
+            .setLowPower(false) // Use maximum radio power
             .build()
 
         connectionsClient.startDiscovery(SERVICE_ID, endpointDiscoveryCallback, options)
@@ -272,10 +273,14 @@ class MeshManager(
     private fun encodeBroadcast(b: EmergencyBroadcast): String {
         // Compact pipe-separated format to stay within 131-byte limit.
         // Format: v1|severity|type|summary|sessionIdShort|respondersNeeded|lat|lng|acc
+        // Limit summary to 30 chars to ensure packet is small enough for maximum range.
         val lat = "%.6f".format(b.broadcasterLat)
         val lng = "%.6f".format(b.broadcasterLng)
-        return "v1|${b.severity}|${b.type.replace("|", "")}|${b.summary.take(40).replace("|", "")}|" +
+        val encoded = "v1|${b.severity}|${b.type.replace("|", "")}|${b.summary.take(30).replace("|", "")}|" +
                "${b.sessionId.take(8)}|${b.respondersNeeded}|$lat|$lng|${b.broadcasterAccuracy}"
+        
+        Log.d(TAG, "Encoded SOS packet (len=${encoded.length}): $encoded")
+        return encoded
     }
 
     private fun decodeBroadcast(encoded: String): EmergencyBroadcast {

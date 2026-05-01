@@ -63,6 +63,21 @@ class MeshService : Service() {
         )
 
         meshManager.startScanning()
+
+        // ── Watchdog ─────────────────────────────────────────────────────────
+        // Nearby Connections can sometimes become "stale" at range limits.
+        // Restarting the scan every 45s keeps the radio fresh.
+        serviceScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(45_000L)
+                if (!_isBroadcasting.value && meshManager.isScanActive) {
+                    Log.d(TAG, "Watchdog: Refreshing background scan for better range")
+                    meshManager.stopScanning()
+                    kotlinx.coroutines.delay(500L)
+                    meshManager.startScanning()
+                }
+            }
+        }
     }
 
     private fun createServiceNotification() = 

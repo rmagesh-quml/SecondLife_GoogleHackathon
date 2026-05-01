@@ -279,6 +279,7 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
                     broadcasterAccuracy = loc?.accuracy ?: 0f,
                 )
                 meshManager.startBroadcasting(packet)
+                _isBroadcasting.emit(true)
                 meshService?.setIsBroadcasting(true)
             } catch (e: Exception) {
                 meshManager.startScanning()
@@ -290,6 +291,7 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
     fun stopBroadcast() {
         meshManager.stopBroadcasting()
         viewModelScope.launch {
+            _isBroadcasting.emit(false)
             meshService?.setIsBroadcasting(false)
             _responderCount.emit(0)
             _responderTasks.emit(emptyMap())
