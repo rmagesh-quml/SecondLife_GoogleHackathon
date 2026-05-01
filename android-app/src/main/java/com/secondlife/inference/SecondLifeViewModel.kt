@@ -144,13 +144,11 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         session.currentMode = mode
     }
 
-    /** Stop TTS / listening, clear image, stop timers, reset conversation. */
+    /** Exit the current session: stop timers and start a fresh one. */
     fun cancelSession() {
-        _capturedImage.value  = null
-        _handoffReport.value  = null
         timerManager.stopTimer()
         timerManager.stopMetronome()
-        session.resetConversation()
+        newSession()
     }
 
     // ── Timer / metronome ────────────────────────────────────────────────────
