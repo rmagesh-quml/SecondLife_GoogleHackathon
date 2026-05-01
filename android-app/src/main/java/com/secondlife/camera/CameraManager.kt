@@ -6,6 +6,7 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
@@ -30,6 +31,7 @@ class CameraManager(
     private val executor = ContextCompat.getMainExecutor(context)
     private var cameraProvider: ProcessCameraProvider? = null
     private var imageCapture: ImageCapture? = null
+    private var previewUseCase: Preview? = null
 
     suspend fun initialize() {
         val provider = suspendCancellableCoroutine<ProcessCameraProvider> { cont ->
@@ -68,10 +70,53 @@ class CameraManager(
         return centerCrop(raw, TARGET_SIZE)
     }
 
+    // ── Viewfinder (in-app camera overlay) ────────────────────────────────────
+
+    /**
+     * Attach a live preview to [surfaceProvider] (from a [PreviewView]).
+     * Rebinds CameraX with both Preview + ImageCapture so capture still works.
+     * Call this when the camera overlay becomes visible.
+     */
+    fun startPreview(surfaceProvider: Preview.SurfaceProvider) {
+        val provider = cameraProvider ?: return
+        val capture  = imageCapture  ?: return
+        val preview  = Preview.Builder().build().also { it.setSurfaceProvider(surfaceProvider) }
+        previewUseCase = preview
+        try {
+            // Rebind with both use-cases; unbindAll first to avoid duplicate-binding errors.
+            provider.unbindAll()
+            provider.bindToLifecycle(
+                lifecycleOwner,
+                CameraSelector.DEFAULT_BACK_CAMERA,
+                preview,
+                capture,
+            )
+        } catch (e: Exception) {
+            android.util.Log.e("CameraManager", "startPreview failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Remove the preview and restore the ImageCapture-only binding.
+     * Call this when the camera overlay is dismissed.
+     */
+    fun stopPreview() {
+        val provider = cameraProvider ?: return
+        val capture  = imageCapture  ?: return
+        previewUseCase = null
+        try {
+            provider.unbindAll()
+            provider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, capture)
+        } catch (e: Exception) {
+            android.util.Log.e("CameraManager", "stopPreview failed: ${e.message}")
+        }
+    }
+
     fun release() {
         cameraProvider?.unbindAll()
         cameraProvider = null
         imageCapture   = null
+        previewUseCase = null
     }
 
     private fun centerCrop(src: Bitmap, size: Int): Bitmap {

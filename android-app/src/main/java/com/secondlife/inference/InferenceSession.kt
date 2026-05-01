@@ -2,8 +2,11 @@ package com.secondlife.inference
 
 import android.content.Context
 import android.graphics.Bitmap
+import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
+import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Conversation
+import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.secondlife.emergency.EmergencyRouter
@@ -118,12 +121,60 @@ class InferenceSession(
         }
 
         try {
-            android.util.Log.i("InferenceSession", "Loading model from $modelPath (${modelFile.length() / 1_048_576} MB)…")
-            val config = EngineConfig(modelPath = modelPath)
-            engine = Engine(config)
-            engine?.initialize()
+            val sizeMb = modelFile.length() / 1_048_576
+            android.util.Log.i("InferenceSession", "Loading model from $modelPath ($sizeMb MB)…")
+
+            // ── GPU-first backend chain for Samsung Galaxy S25 Ultra ──────────
+            // Priority: GpuArtisan (Adreno 830, Snapdragon 8 Elite)
+            //         → GPU (standard OpenCL path)
+            //         → CPU with 8 threads (safe fallback)
+            // maxNumImages=1 enables real multimodal image+text input.
+            // cacheDir speeds up subsequent loads by caching compiled kernels.
+            val cacheDir = context.cacheDir.absolutePath
+            val backends = listOf(
+                "GpuArtisan" to EngineConfig(
+                    modelPath     = modelPath,
+                    backend       = Backend.GpuArtisan(),
+                    visionBackend = Backend.GPU(),
+                    maxNumTokens  = 512,
+                    maxNumImages  = 1,
+                    cacheDir      = cacheDir,
+                ),
+                "GPU" to EngineConfig(
+                    modelPath     = modelPath,
+                    backend       = Backend.GPU(),
+                    visionBackend = Backend.GPU(),
+                    maxNumTokens  = 512,
+                    maxNumImages  = 1,
+                    cacheDir      = cacheDir,
+                ),
+                "CPU(8T)" to EngineConfig(
+                    modelPath     = modelPath,
+                    backend       = Backend.CPU(numOfThreads = 8),
+                    visionBackend = Backend.CPU(numOfThreads = 4),
+                    maxNumTokens  = 512,
+                    maxNumImages  = 1,
+                    cacheDir      = cacheDir,
+                ),
+            )
+
+            var lastError: Exception? = null
+            for ((name, cfg) in backends) {
+                try {
+                    android.util.Log.i("InferenceSession", "Trying $name backend…")
+                    val e = Engine(cfg)
+                    e.initialize()
+                    engine = e
+                    android.util.Log.i("InferenceSession", "✅ $name backend initialised — model ready!")
+                    break
+                } catch (e: Exception) {
+                    android.util.Log.w("InferenceSession", "$name backend failed: ${e.message}")
+                    lastError = e
+                }
+            }
+
+            if (engine == null) throw (lastError ?: Exception("All backends failed"))
             _modelReady.value = true
-            android.util.Log.i("InferenceSession", "Model loaded successfully ✓")
         } catch (e: Exception) {
             android.util.Log.e("InferenceSession", "Model init failed: ${e.message}", e)
             // Mark ready so the app still works with protocol-card fallback
@@ -190,10 +241,23 @@ class InferenceSession(
             // 5. Run Gemma — reuse persistent conversation for follow-up turns
             val result = if (engine != null) {
                 if (activeConversation == null) {
-                    activeConversation = engine!!.createConversation()
+                    // Wire a role-specific system instruction at conversation creation.
+                    // This keeps per-message prompts shorter → faster first-token latency.
+                    val sysPrompt = Contents.of(Content.Text(buildSystemInstruction(currentRole)))
+                    val convCfg   = ConversationConfig(systemInstruction = sysPrompt)
+                    activeConversation = engine!!.createConversation(convCfg)
                 }
                 val conversation = activeConversation!!
-                val message = conversation.sendMessage(prompt, emptyMap())
+
+                // Send as multimodal Contents when an image is attached; text-only otherwise.
+                val message = if (image != null) {
+                    val jpegBytes = bitmapToJpegBytes(image)
+                    val contents  = Contents.of(Content.ImageBytes(jpegBytes), Content.Text(prompt))
+                    conversation.sendMessage(contents, emptyMap())
+                } else {
+                    conversation.sendMessage(prompt, emptyMap())
+                }
+
                 isFirstTurn = false
                 val raw = message.contents.contents
                     .filterIsInstance<Content.Text>()
@@ -415,6 +479,30 @@ The "speak" field must describe the actual emergency actions, not generic phrase
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    // ── System instruction (role-specific, set once per conversation) ────────
+
+    private fun buildSystemInstruction(role: String): String = when (role) {
+        "layperson"      ->
+            "You are an offline emergency first-aid assistant. " +
+            "Respond with numbered steps in plain English. No jargon. Be concise and direct."
+        "paramedic"      ->
+            "You are a clinical emergency decision-support tool. " +
+            "Use medical terminology. Include drug names and dosages where relevant. Numbered steps."
+        "military_medic" ->
+            "You are a TCCC decision-support tool. Apply MARCH protocol. " +
+            "Austere environment assumed. Be decisive. Numbered steps."
+        else             -> "You are an emergency medical assistant. Give clear, numbered steps."
+    }
+
+    // ── Image helpers ─────────────────────────────────────────────────────────
+
+    /** Compress Bitmap to JPEG bytes for the LiteRT-LM vision backend. */
+    private fun bitmapToJpegBytes(bitmap: Bitmap, quality: Int = 80): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+        return out.toByteArray()
+    }
 
     private fun chunk(id: String, text: String) =
         ProtocolChunk(id = id, text = text, source = "protocol_cache", page = 0)

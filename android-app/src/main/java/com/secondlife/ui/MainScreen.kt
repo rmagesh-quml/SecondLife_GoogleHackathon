@@ -154,7 +154,8 @@ fun MainScreen(
     val isBroadcasting by viewModel.isBroadcasting.collectAsStateWithLifecycle()
     val responderCount by viewModel.responderCount.collectAsStateWithLifecycle()
     val responderTasks by viewModel.responderTasks.collectAsStateWithLifecycle()
-    var selectedMode   by remember { mutableStateOf(ResponseMode.DETAIL) }
+    var selectedMode      by remember { mutableStateOf(ResponseMode.DETAIL) }
+    var showCameraOverlay by remember { mutableStateOf(false) }
 
     // Tick once per second to update the session timer without recomposing
     // the entire tree on every frame.
@@ -208,13 +209,7 @@ fun MainScreen(
 
     val callbacks = MainUiCallbacks(
         onMicTap     = { speechManager.toggle() },
-        onCameraTap  = {
-            scope.launch {
-                runCatching { cameraManager.captureFrame() }
-                    .onSuccess { viewModel.setCapturedImage(it) }
-                    .onFailure { viewModel.postError("Camera failed: ${it.message}") }
-            }
-        },
+        onCameraTap  = { showCameraOverlay = true },
         onCancelTap     = {
             ttsManager.stop()
             speechManager.stop()
@@ -268,6 +263,25 @@ fun MainScreen(
         drawerContent = { EmergencySessionsDrawer(state, callbacks) },
     ) {
         MainScreenContent(state = state, callbacks = callbacks)
+    }
+
+    // ── Full-screen camera overlay ────────────────────────────────────────────
+    // Shown when the user taps the camera button; works like Claude/ChatGPT's
+    // in-app photo capture — live viewfinder, one-tap shutter, gallery picker.
+    if (showCameraOverlay) {
+        CameraCapture(
+            cameraManager   = cameraManager,
+            onImageCaptured = { bitmap ->
+                viewModel.setCapturedImage(bitmap)
+                showCameraOverlay = false
+                // Auto-submit a scene-analysis query so the AI responds immediately
+                viewModel.query(
+                    "Analyze this scene: describe what injury or emergency you see " +
+                    "and tell me the most important immediate steps to take."
+                )
+            },
+            onDismiss = { showCameraOverlay = false },
+        )
     }
 }
 
