@@ -154,9 +154,15 @@ fun MainScreen(
     }
     val elapsed = sessionStarted?.let { nowMs - it }
 
-    // Speak each new completed response aloud
+    // Speak each new completed response aloud — use steps when available for
+    // natural speech (no numbering), else fall back to the response text.
     LaunchedEffect(response) {
-        response?.response?.takeIf { it.isNotBlank() }?.let { ttsManager.speak(it) }
+        val r = response ?: return@LaunchedEffect
+        val text = if (r.steps.isNotEmpty())
+            r.steps.joinToString(". ")
+        else
+            r.response
+        if (text.isNotBlank()) ttsManager.speak(text)
     }
 
     val state = MainUiState(
@@ -316,16 +322,37 @@ fun MainScreenContent(
                     color = indicatorColor(state),
                 )
 
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(8.dp))
+
+                // Mode toggle + report button — always visible above the list
+                ModeToggleRow(
+                    selectedMode     = state.selectedMode,
+                    hasResponse      = state.latestResponse != null,
+                    onModeChange     = callbacks.onModeChange,
+                    onGenerateReport = callbacks.onGenerateReport,
+                )
+
+                Spacer(Modifier.height(8.dp))
 
                 // Conversation thread — all turns in chronological order.
                 // Bottom padding clears the floating action bar (~110 dp).
                 LazyColumn(
                     state               = listState,
                     modifier            = Modifier.weight(1f).fillMaxWidth(),
-                    contentPadding      = PaddingValues(bottom = 120.dp),
+                    contentPadding      = PaddingValues(bottom = 110.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
+                    // Active timer as first item so it doesn't float over the transcript
+                    state.timerState?.let { timer ->
+                        item("timer") {
+                            TimerRow(
+                                timerState    = timer,
+                                metronomeBeat = state.metronomeBeat,
+                                onStop        = callbacks.onStopTimer,
+                                onReset       = callbacks.onResetTimer,
+                            )
+                        }
+                    }
                     items(state.transcript, key = { it.id }) { turn ->
                         val isLatest  = turn.id == state.transcript.lastOrNull()?.id
                         TranscriptTurnView(
@@ -346,31 +373,6 @@ fun MainScreenContent(
                         }
                     }
                 }
-            }
-
-            // Timer / mode row above the action bar
-            Column(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 106.dp)
-                    .padding(horizontal = 20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                state.timerState?.let { timer ->
-                    TimerRow(
-                        timerState    = timer,
-                        metronomeBeat = state.metronomeBeat,
-                        onStop        = callbacks.onStopTimer,
-                        onReset       = callbacks.onResetTimer,
-                    )
-                }
-                ModeToggleRow(
-                    selectedMode     = state.selectedMode,
-                    hasResponse      = state.latestResponse != null,
-                    onModeChange     = callbacks.onModeChange,
-                    onGenerateReport = callbacks.onGenerateReport,
-                )
             }
 
             // Floating action bar pinned to the bottom of the screen.
