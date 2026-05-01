@@ -20,7 +20,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
@@ -43,9 +42,8 @@ import java.util.concurrent.TimeUnit
  */
 class SecondLifeViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val modelPath     = resolveModelPath(application)
-    private val protocolsPath = resolveProtocolsPath(application)
-    private val session       = InferenceSession(application, modelPath, protocolsPath)
+    // Session is owned by SecondLifeApplication — never recreated on config changes.
+    private val session = (application as com.secondlife.SecondLifeApplication).inferenceSession
 
     val isLoading:     StateFlow<Boolean> = session.isLoading
     val modelReady:    StateFlow<Boolean> = session.modelReady
@@ -132,8 +130,7 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         transcript.stateInMappedToResponse()
 
     init {
-        // Preload model at app start — not on first query.
-        viewModelScope.launch { session.initModel() }
+        // Model loading is started by SecondLifeApplication.onCreate() — nothing to do here.
         // Always passively scan so Person B gets alerts automatically.
         meshManager.startScanning()
     }
@@ -234,6 +231,10 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
      */
     fun query(text: String, audio: Any? = null) {
         if (text.isBlank()) return
+        if (!session.modelReady.value) {
+            postError("Model is still loading — please wait a moment")
+            return
+        }
         _handoffReport.value = null
         val capturedId  = _activeSessionId.value
         val pendingTurn = TranscriptTurn(userText = text, response = null)
@@ -250,6 +251,10 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
 
         val image = _capturedImage.value
         viewModelScope.launch {
+            // Pause BLE scanning during inference — reduces thermal pressure on Snapdragon.
+            // Nearby Connections + LLM simultaneously causes throttling on the S25 Ultra.
+            meshManager.stopScanning()
+            try {
             session.respond(text, audio = audio, image = image)
             val completed = session.response.value ?: return@launch
 
@@ -270,6 +275,10 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
             card?.timerLabel?.let { label ->
                 if (protocolId == EmergencyRouter.ProtocolId.CPR) timerManager.startMetronome()
                 else timerManager.startTimer(label, hint = card.timerHint)
+            }
+            } finally {
+                // Always resume scanning after inference completes or fails.
+                meshManager.startScanning()
             }
         }
     }
@@ -458,24 +467,4 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    companion object {
-        private fun resolveModelPath(app: Application): String {
-            val dirs = listOf(
-                "/data/local/tmp/",
-                "/sdcard/Download/models/",
-                "/storage/emulated/0/Download/models/",
-                app.filesDir.absolutePath + "/",
-            )
-            for (dir in dirs) {
-                val f = File(dir, "gemma-4-E4B-it.litertlm")
-                if (f.exists()) return f.absolutePath
-            }
-            return File(app.filesDir, "gemma-4-E4B-it.litertlm").absolutePath
-        }
-
-        private fun resolveProtocolsPath(app: Application): String? {
-            val f = File(app.filesDir, "protocols.json")
-            return if (f.exists()) f.absolutePath else null
-        }
-    }
 }

@@ -266,6 +266,15 @@ class MainActivity : ComponentActivity() {
         sensorManager.unregisterListener(shakeListener)
     }
 
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+            android.util.Log.w("SECONDLIFE", "Memory pressure level=$level — trimming non-essential resources")
+            // Release camera when under memory pressure (it re-initializes on next use)
+            if (::cameraManager.isInitialized) cameraManager.release()
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         if (::ttsManager.isInitialized)    ttsManager.release()

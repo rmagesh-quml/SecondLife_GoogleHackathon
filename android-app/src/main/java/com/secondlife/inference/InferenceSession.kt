@@ -13,6 +13,8 @@ import com.secondlife.rag.ProtocolChunk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -42,6 +44,9 @@ class InferenceSession(
     // Only reset via resetConversation() or role change.
     private var activeConversation: Conversation? = null
     private var isFirstTurn: Boolean = true
+
+    // Serialises inference — exactly one query runs at a time, no native crashes from concurrency.
+    private val inferenceMutex = Mutex()
 
     private val retriever = BM25Retriever(context, protocolsPath)
     private val auditLog  = KotlinAuditLog()
@@ -115,6 +120,7 @@ class InferenceSession(
         audio: Any? = null,
         image: Bitmap? = null,
     ) = withContext(Dispatchers.IO) {
+        inferenceMutex.withLock {
         _isLoading.value = true
         _streamingText.value = ""
         val startTime = System.currentTimeMillis()
@@ -211,6 +217,7 @@ class InferenceSession(
             _isLoading.value = false
             _streamingText.value = ""
         }
+        } // end inferenceMutex.withLock
     }
 
     suspend fun generateBroadcastPacket(
@@ -325,32 +332,18 @@ The "speak" field must describe the actual emergency actions, not generic phrase
     ): String {
         val instruction = when (role) {
             "layperson" ->
-                "You are SecondLife, an emergency medical assistant. " +
-                "The person in front of you has NO medical training and is likely panicking. " +
-                "You MUST address the specific injury or emergency they describe — do NOT give generic first aid. " +
-                "Use plain, simple English. Write numbered steps (1. 2. 3. etc). " +
-                "Start with the single most critical action. Be specific, detailed, and calm. " +
-                "Do not use markdown formatting like ** or *. Write plain text only."
+                "Emergency guide. Numbered steps only. Max 6 steps. Plain English. No jargon. Address the exact emergency described."
             "paramedic" ->
-                "You are SecondLife, a clinical decision-support tool for a trained paramedic. " +
-                "Address the specific presentation described — do NOT give generic protocols. " +
-                "Use clinical terminology. Include drug names and dosages where relevant. " +
-                "Be thorough and precise. Number your steps. Do not use ** markdown."
+                "Clinical emergency support. Address exact presentation. Clinical terms. Drug names/dosages where relevant. Numbered steps."
             "military_medic" ->
-                "You are SecondLife, a TCCC assistant for a military medic in the field. " +
-                "Apply MARCH protocol to the SPECIFIC injury described. " +
-                "Assume austere environment, limited supplies. Be direct and decisive. " +
-                "Number every action. Do not use ** markdown."
-            else -> "You are an emergency assistant. Give specific, numbered instructions for the exact emergency described. Plain text only."
+                "TCCC. MARCH protocol. Austere environment. Numbered steps. Be decisive."
+            else -> "Emergency assistant. Numbered steps. Address exact emergency described."
         }
 
         val imageNote = if (hasImage)
-            "\nThe responder has visually assessed the scene and photographed the injury. " +
-            "Treat this as confirmed visual information. Address ONLY the specific injury described below. " +
-            "Do NOT ask for photos, more information, or suggest calling a doctor — give actionable steps NOW.\n"
+            "\nScene visually assessed. Address only what is described. Give steps now.\n"
         else
-            "\nAddress the SPECIFIC emergency described below. Do not give generic first aid. " +
-            "Do not ask for more information. Give specific numbered steps now.\n"
+            "\nAddress this specific emergency only. Give numbered steps now.\n"
 
         val contextBlock = if (chunks.isNotEmpty()) {
             "\n--- Protocol reference (use ONLY if directly relevant to the emergency above) ---\n" +
