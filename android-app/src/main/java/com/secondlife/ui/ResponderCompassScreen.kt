@@ -13,31 +13,34 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * Full-screen compass shown to Person B after they accept the SOS.
- *
- * Two modes:
- *  GPS mode   — arrow rotates to point exactly toward Person A using GPS bearing.
- *  RSSI mode  — GPS unavailable; shows a signal-strength finder instead.
- *               User walks until bars fill up (signal gets stronger = closer).
- *
- * arrowRotation = bearing-to-victim minus device-heading (0° = straight ahead).
- * distanceMeters = null when GPS is unavailable.
+ * Full-screen "Warm/Cool" responder interface.
+ * The background gradient and central glow shift from Blue (Cold) to Red (Hot)
+ * as the responder gets closer to the victim.
  */
+private val COLD_BG = Color(0xFF06111E)
+private val HOT_BG  = Color(0xFF3D0508)
+
 @Composable
 fun ResponderCompassScreen(
     arrowRotation: Float,
@@ -47,310 +50,271 @@ fun ResponderCompassScreen(
     assignedTask: String?,
     onArrived: () -> Unit,
 ) {
+    // 0 = none, 5 = very close
+    val rssiStrength = rssiLabelToStrength(rssiLabel)
+
+    // 0.0 = far/cold   →   1.0 = close/hot
+    val targetWarmth = when {
+        // If Bluetooth says we are "Very close", trust it over GPS 
+        // (GPS is often inaccurate or stale indoors)
+        rssiStrength >= 5 -> 1.0f
+        
+        distanceMeters != null && distanceMeters <= 5f -> 1.0f
+        
+        // RELAXED FOR DEMO: Allow GPS to drive warmth if distance is plausible
+        distanceMeters != null && distanceMeters < 1000f ->
+            (1f - (distanceMeters / 150f).coerceIn(0f, 1f))
+            
+        else -> rssiStrength / 5f
+    }
+    
+    val warmth by animateFloatAsState(
+        targetValue   = targetWarmth,
+        animationSpec = tween(durationMillis = 700, easing = LinearEasing),
+        label         = "warmth",
+    )
+
+    // Glow pulse speed scales from 1800ms (cold) to 400ms (hot)
+    val pulseDuration = (1800 - (warmth * 1400).toInt()).coerceAtLeast(400)
+    val inf = rememberInfiniteTransition(label = "heatPulse")
+    val glowPulse by inf.animateFloat(
+        initialValue  = 0.6f,
+        targetValue   = 1.0f,
+        animationSpec = infiniteRepeatable(
+            tween(pulseDuration, easing = FastOutSlowInEasing),
+            RepeatMode.Reverse,
+        ),
+        label = "glowPulse",
+    )
+
+    val bgColor = lerp(COLD_BG, HOT_BG, warmth)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF050505)),
+            .background(bgColor),
         contentAlignment = Alignment.Center,
     ) {
+        // Central heat glow
+        Canvas(modifier = Modifier.size(400.dp)) {
+            val glowAlpha = (0.1f + warmth * 0.5f) * glowPulse
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xFFFF3B30).copy(alpha = glowAlpha),
+                        Color(0xFFFF3B30).copy(alpha = glowAlpha * 0.3f),
+                        Color.Transparent,
+                    ),
+                    center = center,
+                    radius = size.width / 2f,
+                ),
+                radius = size.width / 2f,
+            )
+        }
+
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 24.dp)
-                .padding(top = 56.dp, bottom = 32.dp),
+                .padding(top = 64.dp, bottom = 48.dp),
         ) {
-            // Header
+            // ── Dynamic Header ────────────────────────────────────────────────
+            val headerData = when {
+                warmth >= 0.95f -> "YOU'RE THERE — STAY WITH THEM" to Color(0xFFFF3B30)
+                warmth >= 0.75f -> "GETTING HOT — ALMOST THERE"     to Color(0xFFFF6B6B)
+                warmth >= 0.5f  -> "WARMER — KEEP GOING"            to Color(0xFFFF9F1C)
+                warmth >= 0.25f -> "FOLLOW THE SIGNAL"              to Color(0xFF4D96FF)
+                else            -> "FIND THEM BY SIGNAL"             to Color(0xFF3A7BD5)
+            }
+            
             Text(
-                if (isGpsAvailable) "NAVIGATE TO THEM" else "FIND THEM BY SIGNAL",
-                color         = Color(0xFFFF3B30),
-                fontWeight    = FontWeight.ExtraBold,
-                fontSize      = 13.sp,
-                letterSpacing = 3.sp,
+                text          = headerData.first,
+                color         = headerData.second,
+                fontWeight    = FontWeight.Black,
+                fontSize      = 14.sp,
+                letterSpacing = 2.sp,
+                textAlign     = TextAlign.Center,
             )
 
-            // ── Main finder widget ────────────────────────────────────────────
-            if (isGpsAvailable && distanceMeters != null && distanceMeters > 8f) {
-                GpsCompass(arrowRotation = arrowRotation, distanceMeters = distanceMeters)
+            if (distanceMeters != null && distanceMeters > 2f) {
+                Box(
+                    modifier = Modifier
+                        .size(240.dp)
+                        .rotate(arrowRotation),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Outer decorative ring
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        drawCircle(
+                            color = Color.White.copy(alpha = 0.15f),
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()),
+                            radius = size.width / 2f
+                        )
+                    }
+                    
+                    // The needle
+                    Canvas(modifier = Modifier.size(80.dp)) {
+                        val path = Path().apply {
+                            moveTo(size.width / 2f, 0f)
+                            lineTo(size.width, size.height)
+                            lineTo(size.width / 2f, size.height * 0.75f)
+                            lineTo(0f, size.height)
+                            close()
+                        }
+                        drawPath(path, color = Color.White)
+                    }
+                }
             } else {
-                // If GPS is unavailable OR we are within 8m (where GPS is too jittery),
-                // switch to Bluetooth RSSI mode which is much more precise for close-range.
-                val title = if (distanceMeters != null && distanceMeters <= 8f) 
-                    "YOU ARE VERY CLOSE" else rssiLabel
-                RssiSignalFinder(rssiLabel = title)
+                // ── RSSI / Searching State ─────────────────────────────────────
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        modifier         = Modifier.size(200.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val infinite = rememberInfiniteTransition(label = "homing")
+                        val pulseScale by infinite.animateFloat(
+                            initialValue = 0.85f, targetValue = 1.15f,
+                            animationSpec = infiniteRepeatable(tween(1000), RepeatMode.Reverse),
+                            label = "pulse"
+                        )
+                        // Decorative rings
+                        Box(Modifier.size(160.dp).background(Color.White.copy(alpha = 0.05f), CircleShape))
+                        Box(Modifier.size(120.dp).background(Color.White.copy(alpha = 0.08f), CircleShape))
+                        
+                        Box(
+                            Modifier
+                                .size(80.dp)
+                                .scale(pulseScale)
+                                .background(Color.White.copy(alpha = 0.12f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.7f),
+                                modifier = Modifier.size(36.dp)
+                            )
+                        }
+                    }
+                    
+                    Spacer(Modifier.height(24.dp))
+                    
+                    // Signal Bars (matches the user's image)
+                    val strength = rssiLabelToStrength(rssiLabel)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.Bottom
+                    ) {
+                        for (i in 1..5) {
+                            val active = i <= strength
+                            val barHeight = (12 + i * 10).dp
+                            Box(
+                                modifier = Modifier
+                                    .width(16.dp)
+                                    .height(barHeight)
+                                    .background(
+                                        if (active) Color(0xFFFF9F1C) else Color.White.copy(alpha = 0.1f),
+                                        RoundedCornerShape(4.dp)
+                                    )
+                            )
+                        }
+                    }
+                }
             }
 
-            // ── Assigned task card ────────────────────────────────────────────
-            if (!assignedTask.isNullOrBlank()) {
+            // ── Distance / RSSI Readout ────────────────────────────────────────
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (rssiStrength >= 5) {
+                    Text("HERE", color = Color.White, fontSize = 64.sp, fontWeight = FontWeight.Black)
+                } else if (distanceMeters != null && distanceMeters < 1000f) {
+                    Text("${distanceMeters.toInt()}m", color = Color.White, fontSize = 64.sp, fontWeight = FontWeight.Black)
+                } else {
+                    Text(rssiLabel, color = Color(0xFFFF9F1C), fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
+            // ── Instructions Card (matches the user's image) ──────────────────
+            if (distanceMeters == null || distanceMeters > 5f) {
                 Surface(
-                    shape    = RoundedCornerShape(14.dp),
-                    color    = Color(0xFF111E11),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.Black.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(20.dp)) {
+                        Text(
+                            "HOW TO FIND THEM",
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        
+                        val steps = listOf(
+                            "Walk in any direction",
+                            "Watch the bars — if they drop, turn around",
+                            "Keep walking toward stronger signal",
+                            "Very Close = you're there"
+                        )
+                        
+                        steps.forEachIndexed { index, step ->
+                            Row(verticalAlignment = Alignment.Top) {
+                                Surface(
+                                    modifier = Modifier.size(18.dp),
+                                    shape = CircleShape,
+                                    color = Color.White.copy(alpha = 0.2f)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text("${index + 1}", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                                Spacer(Modifier.width(12.dp))
+                                Text(step, color = Color.White, fontSize = 13.sp, lineHeight = 18.sp)
+                            }
+                            if (index < steps.size - 1) Spacer(Modifier.height(8.dp))
+                        }
+                    }
+                }
+            } else if (!assignedTask.isNullOrBlank()) {
+                // Show task card only when arrived or GPS is active and close
+                Surface(
+                    shape    = RoundedCornerShape(16.dp),
+                    color    = Color.Black.copy(alpha = 0.4f),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Column(Modifier.padding(16.dp)) {
+                    Column(Modifier.padding(20.dp)) {
                         Text(
                             "YOUR TASK",
-                            color         = Color(0xFF30D158),
-                            fontSize      = 11.sp,
-                            fontWeight    = FontWeight.ExtraBold,
-                            letterSpacing = 2.sp,
+                            color      = Color.White.copy(alpha = 0.6f),
+                            fontSize   = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
                             assignedTask,
                             color      = Color.White,
-                            fontSize   = 16.sp,
+                            fontSize   = 17.sp,
                             fontWeight = FontWeight.Medium,
                         )
                     }
                 }
             }
 
-            // ── Arrived button ────────────────────────────────────────────────
+            // ── Arrived Button ────────────────────────────────────────────────
             Button(
                 onClick  = onArrived,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(56.dp),
-                shape  = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF1DB954),
+                modifier = Modifier.fillMaxWidth().height(60.dp),
+                shape    = RoundedCornerShape(16.dp),
+                colors   = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF30D158),
                     contentColor   = Color.Black,
                 ),
             ) {
-                Text("✅  I've Arrived — I'm with them", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text("I'VE ARRIVED", fontWeight = FontWeight.Black, fontSize = 16.sp)
             }
         }
     }
-}
-
-// ── GPS Compass (directional arrow) ───────────────────────────────────────────
-
-@Composable
-private fun GpsCompass(arrowRotation: Float, distanceMeters: Float) {
-    val smoothRotation by animateFloatAsState(
-        targetValue   = arrowRotation,
-        animationSpec = tween(durationMillis = 250, easing = FastOutSlowInEasing),
-        label         = "compassArrow",
-    )
-
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        // Compass disc
-        Box(
-            modifier = Modifier
-                .size(250.dp)
-                .background(Color(0xFF141414), CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            // Tick ring
-            Canvas(modifier = Modifier.size(230.dp)) { drawCompassRing(this) }
-
-            // Animated arrow
-            Box(
-                modifier = Modifier
-                    .size(130.dp)
-                    .rotate(smoothRotation),
-                contentAlignment = Alignment.Center,
-            ) {
-                Canvas(modifier = Modifier.fillMaxSize()) { drawNavigationArrow(this) }
-            }
-
-            // Centre dot
-            Box(Modifier.size(14.dp).background(Color.White, CircleShape))
-        }
-
-        // Distance readout
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                "${distanceMeters.toInt()} m",
-                color      = Color.White,
-                fontWeight = FontWeight.Black,
-                fontSize   = 52.sp,
-            )
-            Text("away", color = Color(0xFF666666), fontSize = 15.sp)
-        }
-
-        Text(
-            "Keep the arrow pointing up.\nWalk straight ahead.",
-            color      = Color(0xFF444444),
-            fontSize   = 12.sp,
-            textAlign  = TextAlign.Center,
-            lineHeight = 18.sp,
-        )
-    }
-}
-
-// ── RSSI Signal Finder (no GPS) ───────────────────────────────────────────────
-
-@Composable
-private fun RssiSignalFinder(rssiLabel: String) {
-    val strength = rssiLabelToStrength(rssiLabel)
-    val inf      = rememberInfiniteTransition(label = "rssi")
-
-    // Pulse intensity scales with signal strength — faster pulse = stronger signal
-    val pulseDuration = when (strength) {
-        5    -> 350
-        4    -> 500
-        3    -> 700
-        2    -> 950
-        1    -> 1200
-        else -> 1600
-    }
-    val pulse by inf.animateFloat(
-        initialValue  = 0.85f,
-        targetValue   = 1.12f,
-        animationSpec = infiniteRepeatable(
-            tween(pulseDuration, easing = LinearEasing),
-            RepeatMode.Reverse,
-        ),
-        label = "signalPulse",
-    )
-
-    // Color shifts from dim red → bright green as signal gets stronger
-    val signalColor = when (strength) {
-        5    -> Color(0xFF00E676)   // bright green — very close
-        4    -> Color(0xFF30D158)   // green
-        3    -> Color(0xFFFFCC00)   // amber
-        2    -> Color(0xFFFF9500)   // orange
-        1    -> Color(0xFFFF3B30)   // red — far
-        else -> Color(0xFF444444)   // grey — no signal
-    }
-
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-    ) {
-        // Pulsing signal disc
-        Box(
-            modifier         = Modifier.size(250.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            // Outer glow ring
-            Box(
-                Modifier
-                    .size((200 * pulse).dp)
-                    .background(signalColor.copy(alpha = 0.12f), CircleShape)
-            )
-            // Inner ring
-            Box(
-                Modifier
-                    .size(160.dp)
-                    .background(signalColor.copy(alpha = 0.18f), CircleShape)
-            )
-            // Core disc
-            Box(
-                Modifier
-                    .size(110.dp)
-                    .background(Color(0xFF141414), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    when (strength) {
-                        5, 4 -> "📡"
-                        3    -> "📶"
-                        2, 1 -> "🔍"
-                        else -> "⏳"
-                    },
-                    fontSize = 40.sp,
-                )
-            }
-        }
-
-        // Large signal bars
-        SignalBars(strength = strength, barColor = signalColor)
-
-        // Distance label — big and clear
-        Text(
-            rssiLabel,
-            color      = signalColor,
-            fontWeight = FontWeight.ExtraBold,
-            fontSize   = 24.sp,
-            textAlign  = TextAlign.Center,
-        )
-
-        // Instructions
-        Surface(
-            shape = RoundedCornerShape(12.dp),
-            color = Color(0xFF151515),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Column(
-                Modifier.padding(horizontal = 20.dp, vertical = 14.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    "HOW TO FIND THEM",
-                    color         = Color(0xFF888888),
-                    fontSize      = 10.sp,
-                    fontWeight    = FontWeight.Bold,
-                    letterSpacing = 2.sp,
-                )
-                InstructionRow("1", "Walk in any direction")
-                InstructionRow("2", "Watch the bars — if they drop, turn around")
-                InstructionRow("3", "Keep walking toward stronger signal")
-                InstructionRow("4", "Very Close = you're there")
-            }
-        }
-    }
-}
-
-@Composable
-private fun InstructionRow(step: String, text: String) {
-    Row(
-        verticalAlignment   = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Box(
-            Modifier
-                .size(22.dp)
-                .background(Color(0xFF222222), CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(step, color = Color(0xFF888888), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        }
-        Text(text, color = Color(0xFFCCCCCC), fontSize = 14.sp)
-    }
-}
-
-// ── Canvas drawing helpers ────────────────────────────────────────────────────
-
-private fun drawCompassRing(scope: DrawScope) {
-    val cx = scope.size.width / 2f
-    val cy = scope.size.height / 2f
-    val outerR = scope.size.width / 2f - 4f
-    val innerR = outerR - 16f
-    for (i in 0 until 12) {
-        val angle = Math.toRadians((i * 30).toDouble())
-        val cos = Math.cos(angle).toFloat()
-        val sin = Math.sin(angle).toFloat()
-        scope.drawLine(
-            color       = if (i == 0) Color(0xFFFF3B30) else Color(0xFF333333),
-            start       = androidx.compose.ui.geometry.Offset(cx + cos * innerR, cy + sin * innerR),
-            end         = androidx.compose.ui.geometry.Offset(cx + cos * outerR, cy + sin * outerR),
-            strokeWidth = if (i == 0) 5f else 2f,
-        )
-    }
-}
-
-private fun drawNavigationArrow(scope: DrawScope) {
-    val w  = scope.size.width
-    val h  = scope.size.height
-    val cx = w / 2f
-    val path = Path().apply {
-        moveTo(cx, 4f)
-        lineTo(cx + w * 0.28f, h * 0.50f)
-        lineTo(cx + w * 0.12f, h * 0.50f)
-        lineTo(cx + w * 0.12f, h - 4f)
-        lineTo(cx - w * 0.12f, h - 4f)
-        lineTo(cx - w * 0.12f, h * 0.50f)
-        lineTo(cx - w * 0.28f, h * 0.50f)
-        close()
-    }
-    scope.drawPath(path, color = Color(0xFFFF3B30))
 }

@@ -39,6 +39,10 @@ class MeshService : Service() {
     private val _rssi = MutableStateFlow(-100)
     val rssi: StateFlow<Int> = _rssi.asStateFlow()
 
+    // Real-time location updates pushed by the broadcaster after a P2P link is established
+    private val _broadcasterLocation = MutableStateFlow<Pair<Double, Double>?>(null)
+    val broadcasterLocation: StateFlow<Pair<Double, Double>?> = _broadcasterLocation.asStateFlow()
+
     inner class MeshBinder : Binder() {
         fun getService(): MeshService = this@MeshService
     }
@@ -65,6 +69,7 @@ class MeshService : Service() {
             onResponderJoined   = { endpointId, count -> onResponderJoined(endpointId, count) },
             onTaskReceived      = { task -> _assignedTask.value = task },
             onRSSIUpdate        = { rssi -> _rssi.value = rssi },
+            onLocationUpdate    = { lat, lng -> _broadcasterLocation.value = lat to lng },
         )
 
         meshManager.startScanning()

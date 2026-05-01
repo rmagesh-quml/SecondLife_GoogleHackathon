@@ -29,6 +29,7 @@ class MeshManager(
     private val onResponderJoined: (String, Int) -> Unit,
     private val onTaskReceived: (String) -> Unit,
     private val onRSSIUpdate: (Int) -> Unit,
+    private val onLocationUpdate: ((Double, Double) -> Unit)? = null,
 ) {
     private val TAG = "MeshManager"
     private val SERVICE_ID = "com.secondlife.emergency"
@@ -145,6 +146,16 @@ class MeshManager(
                         onTaskReceived(task)
                     }.onFailure { Log.w(TAG, "CTX parse failed: ${it.message}") }
                 }
+                // Real-time broadcaster location update: "LOC:lat,lng"
+                text.startsWith("LOC:") -> {
+                    runCatching {
+                        val coords = text.removePrefix("LOC:").split(",")
+                        val lat = coords[0].toDouble()
+                        val lng = coords[1].toDouble()
+                        Log.d(TAG, "📍 Location update from broadcaster: $lat, $lng")
+                        onLocationUpdate?.invoke(lat, lng)
+                    }.onFailure { Log.w(TAG, "LOC parse failed: ${it.message}") }
+                }
             }
         }
 
@@ -197,6 +208,19 @@ class MeshManager(
         val payload = Payload.fromBytes("CTX:$json".toByteArray(StandardCharsets.UTF_8))
         connectionsClient.sendPayload(endpointId, payload)
             .addOnFailureListener { e -> Log.w(TAG, "sendContext failed: ${e.message}") }
+    }
+
+    /**
+     * Sends a real-time location update to a connected responder via Bluetooth payload.
+     * This is much cheaper than stopBroadcasting/startBroadcasting and keeps the
+     * P2P connection alive.
+     */
+    fun sendLocationUpdate(endpointId: String, lat: Double, lng: Double) {
+        val lat5 = String.format(java.util.Locale.US, "%.5f", lat)
+        val lng5 = String.format(java.util.Locale.US, "%.5f", lng)
+        val payload = Payload.fromBytes("LOC:$lat5,$lng5".toByteArray(StandardCharsets.UTF_8))
+        connectionsClient.sendPayload(endpointId, payload)
+            .addOnFailureListener { e -> Log.w(TAG, "sendLocationUpdate failed: ${e.message}") }
     }
 
     fun getConnectedEndpoints(): List<String> = connectedEndpoints.toList()
@@ -276,10 +300,10 @@ class MeshManager(
         // Compact pipe-separated format.
         // IMPORTANT: Nearby Connections endpoint name must stay under 100 bytes.
         // Format: v1|sev|type|summary|sessionIdShort|respondersNeeded|lat|lng|acc
-        // All floats are explicitly formatted to control byte length.
-        val lat = "%.5f".format(b.broadcasterLat)   // e.g. "37.77493"  — 8 chars
-        val lng = "%.5f".format(b.broadcasterLng)   // e.g. "-122.41942" — 10 chars
-        val acc = "%.1f".format(b.broadcasterAccuracy) // e.g. "15.2"   — 4 chars
+        // All floats are explicitly formatted with Locale.US to ensure dot decimals.
+        val lat = String.format(java.util.Locale.US, "%.5f", b.broadcasterLat)
+        val lng = String.format(java.util.Locale.US, "%.5f", b.broadcasterLng)
+        val acc = String.format(java.util.Locale.US, "%.1f", b.broadcasterAccuracy)
         val summary = b.summary.take(25).replace("|", "")  // max 25 chars
         val encoded = "v1|${b.severity}|${b.type.take(12).replace("|", "")}|$summary|" +
                "${b.sessionId.take(8)}|${b.respondersNeeded}|$lat|$lng|$acc"

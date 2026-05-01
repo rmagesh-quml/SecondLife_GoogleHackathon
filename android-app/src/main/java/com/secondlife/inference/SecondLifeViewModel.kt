@@ -14,6 +14,7 @@ import com.secondlife.mesh.CompassNavigator
 import com.secondlife.mesh.MeshManager
 import com.secondlife.mesh.MeshService
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -87,6 +88,14 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         }
         viewModelScope.launch {
             service.rssi.collect { navigator.updateRSSI(it) }
+        }
+        // When the broadcaster sends a LOC: payload after the P2P link is up,
+        // update the compass target in real time — this is the primary mechanism
+        // for delivering coordinates when GPS wasn't ready at SOS trigger time.
+        viewModelScope.launch {
+            service.broadcasterLocation.collect { coords ->
+                coords?.let { (lat, lng) -> navigator.updateTarget(lat, lng) }
+            }
         }
     }
 
@@ -268,38 +277,91 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
 
     // ── Person A actions ──────────────────────────────────────────────────────
 
+    private var broadcastJob: kotlinx.coroutines.Job? = null
+
     fun broadcastSos() {
         if (_isBroadcasting.value) return
-        viewModelScope.launch(Dispatchers.IO) {
+        broadcastJob?.cancel()
+        broadcastJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 meshManager.stopScanning()
-                val loc     = getLastKnownLocation()
-                val latest  = response.value
-                val summary = (latest?.steps?.take(2)?.joinToString(". ")
-                               ?: latest?.response?.take(60)
-                               ?: "Emergency — need help")
-                val packet = MeshManager.EmergencyBroadcast(
-                    severity          = latest?.severity ?: 3,
-                    type              = latest?.protocolId?.lowercase()?.replace("_", " ") ?: "emergency",
-                    summary           = summary.take(50),
-                    sessionId         = java.util.UUID.randomUUID().toString(),
-                    respondersNeeded  = 2,
-                    broadcasterLat    = loc?.latitude  ?: 0.0,
-                    broadcasterLng    = loc?.longitude ?: 0.0,
-                    broadcasterAccuracy = loc?.accuracy ?: 0f,
-                )
-                meshManager.startBroadcasting(packet)
+                val locationClient = LocationServices.getFusedLocationProviderClient(getApplication())
+                
+                // 1. Get whatever we have immediately so the demo starts fast
+                val lastLoc = try {
+                    com.google.android.gms.tasks.Tasks.await(locationClient.lastLocation, 1, java.util.concurrent.TimeUnit.SECONDS)
+                } catch (e: Exception) { null }
+                
+                val sessionId = java.util.UUID.randomUUID().toString()
+                
+                fun sendSosUpdate(loc: android.location.Location?) {
+                    val latest = response.value
+                    val summary = (latest?.steps?.take(2)?.joinToString(". ")
+                        ?: latest?.response?.take(60) ?: "Emergency — need help")
+                    
+                    val packet = MeshManager.EmergencyBroadcast(
+                        severity = latest?.severity ?: 3,
+                        type = latest?.protocolId?.lowercase()?.replace("_", " ") ?: "emergency",
+                        summary = summary.take(50),
+                        sessionId = sessionId,
+                        respondersNeeded = 2,
+                        broadcasterLat = loc?.latitude ?: 0.0,
+                        broadcasterLng = loc?.longitude ?: 0.0,
+                        broadcasterAccuracy = loc?.accuracy ?: 0f,
+                    )
+                    meshManager.stopBroadcasting()
+                    meshManager.startBroadcasting(packet)
+                }
+
+                // Send initial packet immediately
+                sendSosUpdate(lastLoc)
                 _isBroadcasting.emit(true)
                 meshService?.setIsBroadcasting(true)
+
+                // 2. Start a location stream for continuous updates
+                val locationRequest = com.google.android.gms.location.LocationRequest.Builder(
+                    com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY, 2000L
+                ).setMinUpdateDistanceMeters(1f).build()
+
+                val locationFlow = callbackFlow {
+                    val callback = object : com.google.android.gms.location.LocationCallback() {
+                        override fun onLocationResult(result: com.google.android.gms.location.LocationResult) {
+                            result.lastLocation?.let { trySend(it) }
+                        }
+                    }
+                    locationClient.requestLocationUpdates(locationRequest, callback, android.os.Looper.getMainLooper())
+                    awaitClose { locationClient.removeLocationUpdates(callback) }
+                }
+
+                locationFlow.collect { loc ->
+                    val connected = meshManager.getConnectedEndpoints()
+                    if (connected.isNotEmpty()) {
+                        // Responders are already connected via P2P — push location as a payload.
+                        // Do NOT call stopBroadcasting() here: that disconnects all responders!
+                        connected.forEach { endpointId ->
+                            meshManager.sendLocationUpdate(endpointId, loc.latitude, loc.longitude)
+                        }
+                        android.util.Log.d("SecondLifeVM", "Sent LOC payload to ${connected.size} responders: ${loc.latitude}, ${loc.longitude}")
+                    } else {
+                        // No one connected yet — re-advertise with updated coordinates so
+                        // new discoverers see the fresh position in the BLE endpoint name.
+                        sendSosUpdate(loc)
+                        android.util.Log.d("SecondLifeVM", "Re-advertising SOS with fresh coords: ${loc.latitude}, ${loc.longitude}")
+                    }
+                }
             } catch (e: Exception) {
                 android.util.Log.e("SecondLifeVM", "broadcastSos failed: ${e.message}", e)
-                runCatching { meshManager.startScanning() }  // best-effort restart
+                _isBroadcasting.emit(false)
+                meshService?.setIsBroadcasting(false)
+                runCatching { meshManager.startScanning() }
                 postError("Could not start SOS broadcast — is Bluetooth on?")
             }
         }
     }
 
     fun stopBroadcast() {
+        broadcastJob?.cancel()
+        broadcastJob = null
         meshManager.stopBroadcasting()
         viewModelScope.launch {
             _isBroadcasting.emit(false)
@@ -349,15 +411,20 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
     fun triggerDemoMesh() {
         viewModelScope.launch(Dispatchers.IO) {
             meshManager.stopScanning()
+            val locationClient = LocationServices.getFusedLocationProviderClient(getApplication())
+            val lastLoc = try {
+                com.google.android.gms.tasks.Tasks.await(locationClient.lastLocation, 1, java.util.concurrent.TimeUnit.SECONDS)
+            } catch (e: Exception) { null }
+
             val packet = MeshManager.EmergencyBroadcast(
                 severity          = 4,
                 type              = "fracture",
                 summary           = "Broken leg, can't walk, needs help",
                 sessionId         = java.util.UUID.randomUUID().toString(),
                 respondersNeeded  = 2,
-                broadcasterLat    = 0.0,
-                broadcasterLng    = 0.0,
-                broadcasterAccuracy = 0f,
+                broadcasterLat    = lastLoc?.latitude ?: 37.422,
+                broadcasterLng    = lastLoc?.longitude ?: -122.084,
+                broadcasterAccuracy = lastLoc?.accuracy ?: 10f,
             )
             meshManager.startBroadcasting(packet)
             meshService?.setIsBroadcasting(true)
@@ -365,31 +432,29 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun triggerDemoIncomingAlert() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             _pendingEndpointId.emit("demo_endpoint")
+            // Use real GPS coordinates so the compass needle renders in demo mode.
+            // If GPS isn't available yet, fall back to a well-known location (Googleplex)
+            // so at least the compass works directionally.
+            val locationClient = LocationServices.getFusedLocationProviderClient(getApplication())
+            val lastLoc = try {
+                com.google.android.gms.tasks.Tasks.await(locationClient.lastLocation, 1, TimeUnit.SECONDS)
+            } catch (e: Exception) { null }
             _nearbyEmergency.emit(
                 MeshManager.EmergencyBroadcast(
-                    severity         = 4,
-                    type             = "fracture",
-                    summary          = "Broken leg, can't walk, needs help",
-                    sessionId        = "demo-session-001",
-                    respondersNeeded = 2,
-                    broadcasterLat   = 0.0,
-                    broadcasterLng   = 0.0,
-                    broadcasterAccuracy = 0f,
+                    severity            = 4,
+                    type                = "fracture",
+                    summary             = "Broken leg, can't walk, needs help",
+                    sessionId           = "demo-session-001",
+                    respondersNeeded    = 2,
+                    broadcasterLat      = lastLoc?.latitude  ?: 37.4221,
+                    broadcasterLng      = lastLoc?.longitude ?: -122.0840,
+                    broadcasterAccuracy = lastLoc?.accuracy  ?: 10f,
                 )
             )
         }
     }
-
-    @SuppressLint("MissingPermission")
-    private suspend fun getLastKnownLocation(): android.location.Location? =
-        try {
-            com.google.android.gms.tasks.Tasks.await(
-                LocationServices.getFusedLocationProviderClient(getApplication()).lastLocation,
-                2, TimeUnit.SECONDS
-            )
-        } catch (e: Exception) { null }
 
     private fun activeOrNull(): EmergencySession? =
         _sessions.value.firstOrNull { it.id == _activeSessionId.value }
