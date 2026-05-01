@@ -26,9 +26,26 @@ class MainActivity : ComponentActivity() {
     private lateinit var speechManager: SpeechManager
     private lateinit var cameraManager: CameraManager
 
+    private val meshPermissionKeys = setOf(
+        android.Manifest.permission.BLUETOOTH,
+        android.Manifest.permission.BLUETOOTH_ADMIN,
+        android.Manifest.permission.BLUETOOTH_SCAN,
+        android.Manifest.permission.BLUETOOTH_ADVERTISE,
+        android.Manifest.permission.BLUETOOTH_CONNECT,
+        android.Manifest.permission.ACCESS_FINE_LOCATION,
+        android.Manifest.permission.ACCESS_COARSE_LOCATION,
+    )
+
     private val permLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ -> /* permissions handled gracefully in the UI */ }
+    ) { results ->
+        val meshDenied = results.entries.any { (perm, granted) ->
+            perm in meshPermissionKeys && !granted
+        }
+        if (meshDenied) {
+            viewModel.postError("Enable Bluetooth for mesh emergency features")
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,7 +68,16 @@ class MainActivity : ComponentActivity() {
         }
 
         // Request permissions upfront
-        val needed = listOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA)
+        val meshPermissions = listOf(
+            android.Manifest.permission.BLUETOOTH,
+            android.Manifest.permission.BLUETOOTH_ADMIN,
+            android.Manifest.permission.BLUETOOTH_SCAN,
+            android.Manifest.permission.BLUETOOTH_ADVERTISE,
+            android.Manifest.permission.BLUETOOTH_CONNECT,
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION,
+        )
+        val needed = (listOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CAMERA) + meshPermissions)
             .filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
         if (needed.isNotEmpty()) permLauncher.launch(needed.toTypedArray())
 

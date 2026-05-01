@@ -27,6 +27,9 @@ data class MainUiState(
     val metronomeBeat: Boolean = false,
     val handoffReport: String? = null,
     val selectedMode: ResponseMode = ResponseMode.PANIC,
+    val isBroadcasting: Boolean = false,
+    val responderCount: Int = 0,
+    val responderTasks: Map<String, String> = emptyMap(),
 ) {
     val latestResponse: SecondLifeResponse?
         get() = transcript.lastOrNull { it.response != null }?.response

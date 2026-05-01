@@ -9,6 +9,10 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -141,6 +145,9 @@ fun MainScreen(
     val timerState     by viewModel.timerState.collectAsStateWithLifecycle()
     val metronomeBeat  by viewModel.metronomeBeat.collectAsStateWithLifecycle()
     val handoffReport  by viewModel.handoffReport.collectAsStateWithLifecycle()
+    val isBroadcasting by viewModel.isBroadcasting.collectAsStateWithLifecycle()
+    val responderCount by viewModel.responderCount.collectAsStateWithLifecycle()
+    val responderTasks by viewModel.responderTasks.collectAsStateWithLifecycle()
     var selectedMode   by remember { mutableStateOf(ResponseMode.DETAIL) }
 
     // Tick once per second to update the session timer without recomposing
@@ -185,6 +192,9 @@ fun MainScreen(
         metronomeBeat     = metronomeBeat,
         handoffReport     = handoffReport,
         selectedMode      = selectedMode,
+        isBroadcasting    = isBroadcasting,
+        responderCount    = responderCount,
+        responderTasks    = responderTasks,
     )
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -253,6 +263,63 @@ fun MainScreen(
     }
 }
 
+// ── Mesh UI composables ─────────────────────────────────────────────────────
+
+@Composable
+fun MeshStatusBar(isBroadcasting: Boolean, responderCount: Int) {
+    AnimatedVisibility(
+        visible = isBroadcasting,
+        enter   = slideInVertically() + fadeIn(),
+        exit    = slideOutVertically() + fadeOut(),
+    ) {
+        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+        val alpha by infiniteTransition.animateFloat(
+            initialValue = 0.6f, targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(800), RepeatMode.Reverse),
+            label = "pulseAlpha",
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF1B5E20).copy(alpha = alpha))
+                .padding(vertical = 6.dp, horizontal = 16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "📡  BROADCASTING  ·  $responderCount responder${if (responderCount != 1) "s" else ""}",
+                color      = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize   = 13.sp,
+            )
+        }
+    }
+}
+
+@Composable
+fun ResponderListCard(responderTasks: Map<String, String>) {
+    if (responderTasks.isEmpty()) return
+    Card(
+        modifier  = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        colors    = CardDefaults.cardColors(containerColor = Color(0xFF1B5E20).copy(alpha = 0.12f)),
+        elevation = CardDefaults.cardElevation(0.dp),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text("RESPONDERS", fontWeight = FontWeight.Bold, fontSize = 11.sp,
+                color = Color(0xFF2E7D32), letterSpacing = 1.sp)
+            Spacer(Modifier.height(6.dp))
+            responderTasks.entries.forEachIndexed { i, (_, task) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(8.dp).background(Color(0xFF4CAF50), CircleShape))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Responder ${i + 1}  ·  $task",
+                        fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
+                }
+                if (i < responderTasks.size - 1) Spacer(Modifier.height(4.dp))
+            }
+        }
+    }
+}
+
 // ── Pure presentational layer (preview-friendly) ────────────────────────────
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -286,6 +353,11 @@ fun MainScreenContent(
                     .fillMaxSize()
                     .padding(horizontal = 20.dp),
             ) {
+                MeshStatusBar(
+                    isBroadcasting = state.isBroadcasting,
+                    responderCount = state.responderCount,
+                )
+
                 Spacer(Modifier.height(12.dp))
 
                 StatusRow(
@@ -362,6 +434,13 @@ fun MainScreenContent(
                             isLoading = isLatest && state.isThinking,
                         )
                     }
+                    // Responder list card — shown below transcript when broadcasting
+                    if (state.responderTasks.isNotEmpty()) {
+                        item("responders") {
+                            ResponderListCard(responderTasks = state.responderTasks)
+                        }
+                    }
+
                     // Partial-transcript card appended live while the user speaks.
                     if (state.partialTranscript.isNotBlank() && state.isListening) {
                         item("partial") {

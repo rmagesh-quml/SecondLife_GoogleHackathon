@@ -12,4 +12,5 @@ data class SecondLifeResponse(
     val followUpQuestion: String? = null,
     val protocolId: String? = null,
     val timestamp: Long = System.currentTimeMillis(),
+    val severity: Int? = null,
 )

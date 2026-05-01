@@ -1,13 +1,17 @@
 package com.secondlife.inference
 
+import android.annotation.SuppressLint
 import android.app.Application
 import android.graphics.Bitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.google.android.gms.location.LocationServices
 import com.secondlife.emergency.EmergencyRouter
 import com.secondlife.emergency.EmergencyTimerManager
 import com.secondlife.emergency.ProtocolCardCache
 import com.secondlife.emergency.TimerState
+import com.secondlife.mesh.MeshManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -16,6 +20,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 /**
  * ViewModel that owns the list of [EmergencySession]s.
@@ -61,6 +66,30 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
     val timerState:    StateFlow<TimerState?> = timerManager.timerState
     val metronomeBeat: StateFlow<Boolean>     = timerManager.metronomeBeat
 
+    // ── Mesh ─────────────────────────────────────────────────────────────────
+    val meshManager = MeshManager(
+        context              = application,
+        onEmergencyReceived  = { broadcast, endpointId -> onEmergencyReceived(broadcast, endpointId) },
+        onResponderJoined    = { endpointId, count -> onResponderJoined(endpointId, count) },
+        onTaskReceived       = { task -> onTaskReceived(task) },
+        onRSSIUpdate         = { rssi -> onRSSIUpdate(rssi) },
+    )
+
+    private val _isBroadcasting = MutableStateFlow(false)
+    val isBroadcasting: StateFlow<Boolean> = _isBroadcasting.asStateFlow()
+
+    private val _responderCount = MutableStateFlow(0)
+    val responderCount: StateFlow<Int> = _responderCount.asStateFlow()
+
+    private val _responderTasks = MutableStateFlow<Map<String, String>>(emptyMap())
+    val responderTasks: StateFlow<Map<String, String>> = _responderTasks.asStateFlow()
+
+    private val _nearbyEmergency = MutableStateFlow<MeshManager.EmergencyBroadcast?>(null)
+    val nearbyEmergency: StateFlow<MeshManager.EmergencyBroadcast?> = _nearbyEmergency.asStateFlow()
+
+    private val _assignedTask = MutableStateFlow<String?>(null)
+    val assignedTask: StateFlow<String?> = _assignedTask.asStateFlow()
+
     // ── Sessions ────────────────────────────────────────────────────────────
     private val initialSession = EmergencySession()
 
@@ -93,6 +122,15 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
     init {
         // Preload model at app start — not on first query.
         viewModelScope.launch { session.initModel() }
+        // Start scanning for nearby emergencies.
+        meshManager.startScanning()
+        // Auto-broadcast when a high-severity response arrives.
+        viewModelScope.launch {
+            session.response.collect { result ->
+                result ?: return@collect
+                checkAndBroadcast(result)
+            }
+        }
     }
 
     // ── Camera ──────────────────────────────────────────────────────────────
@@ -237,7 +275,105 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         super.onCleared()
         timerManager.release()
         session.release()
+        meshManager.release()
     }
+
+    // ── Mesh callbacks ───────────────────────────────────────────────────────
+
+    private fun onEmergencyReceived(broadcast: MeshManager.EmergencyBroadcast, endpointId: String) {
+        viewModelScope.launch {
+            _nearbyEmergency.emit(broadcast)
+        }
+    }
+
+    private fun onResponderJoined(endpointId: String, count: Int) {
+        viewModelScope.launch {
+            _responderCount.emit(count)
+            if (count > 0) {
+                val task = meshManager.assignTask(count)
+                val current = _responderTasks.value.toMutableMap()
+                current[endpointId] = task
+                _responderTasks.emit(current)
+                meshManager.sendTaskAssignment(endpointId, task)
+            }
+        }
+    }
+
+    private fun onTaskReceived(task: String) {
+        viewModelScope.launch { _assignedTask.emit(task) }
+    }
+
+    private fun onRSSIUpdate(rssi: Int) {
+        // No-op at ViewModel level — navigator handles RSSI display
+    }
+
+    // ── Mesh actions ─────────────────────────────────────────────────────────
+
+    fun respondToEmergency(endpointId: String) {
+        val broadcast = _nearbyEmergency.value ?: return
+        meshManager.joinSession(endpointId, broadcast.sessionId)
+    }
+
+    fun dismissEmergency() {
+        viewModelScope.launch { _nearbyEmergency.emit(null) }
+    }
+
+    fun endSession() {
+        meshManager.stopBroadcasting()
+        meshManager.stopScanning()
+        viewModelScope.launch {
+            _isBroadcasting.emit(false)
+            _responderCount.emit(0)
+            _responderTasks.emit(emptyMap())
+        }
+        cancelSession()
+    }
+
+    fun triggerDemoMesh() {
+        viewModelScope.launch {
+            _isBroadcasting.emit(true)
+            kotlinx.coroutines.delay(3000)
+            _responderCount.emit(1)
+            _responderTasks.emit(mapOf("demo_1" to "Locate an AED nearby"))
+            kotlinx.coroutines.delay(4000)
+            _responderCount.emit(2)
+            _responderTasks.emit(mapOf(
+                "demo_1" to "Locate an AED nearby",
+                "demo_2" to "Call 911 when signal returns",
+            ))
+        }
+    }
+
+    // ── Auto-broadcast ───────────────────────────────────────────────────────
+
+    private fun checkAndBroadcast(result: SecondLifeResponse) {
+        if ((result.severity ?: 0) >= 3 && !_isBroadcasting.value) {
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    val loc = getLastKnownLocation()
+                    val summary = result.response.take(120)
+                    val packet = session.generateBroadcastPacket(
+                        summary, result.severity ?: 3,
+                        java.util.UUID.randomUUID().toString(),
+                        loc?.latitude ?: 0.0, loc?.longitude ?: 0.0
+                    )
+                    meshManager.startBroadcasting(packet)
+                    _isBroadcasting.emit(true)
+                } catch (e: Exception) {
+                    android.util.Log.w("ViewModel", "Auto-broadcast failed: ${e.message}")
+                }
+            }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private suspend fun getLastKnownLocation(): android.location.Location? =
+        try {
+            com.google.android.gms.tasks.Tasks.await(
+                LocationServices.getFusedLocationProviderClient(getApplication()).lastLocation,
+                2, TimeUnit.SECONDS
+            )
+        } catch (e: Exception) { null }
 
     // ── Internals ───────────────────────────────────────────────────────────
     private fun activeOrNull(): EmergencySession? =

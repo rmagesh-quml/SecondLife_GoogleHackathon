@@ -213,6 +213,58 @@ class InferenceSession(
         }
     }
 
+    suspend fun generateBroadcastPacket(
+        sessionSummary: String,
+        severity: Int,
+        sessionId: String,
+        broadcasterLat: Double,
+        broadcasterLng: Double,
+    ): com.secondlife.mesh.MeshManager.EmergencyBroadcast = withContext(Dispatchers.IO) {
+        val safeDefaults = com.secondlife.mesh.MeshManager.EmergencyBroadcast(
+            severity          = severity,
+            type              = "other",
+            summary           = "Emergency assistance needed",
+            sessionId         = sessionId,
+            respondersNeeded  = 2,
+            broadcasterLat    = broadcasterLat,
+            broadcasterLng    = broadcasterLng,
+            broadcasterAccuracy = 0f,
+        )
+        try {
+            if (engine == null || activeConversation == null) return@withContext safeDefaults
+
+            val prompt = "Classify this emergency and summarize in under 10 words. " +
+                "Return ONLY valid JSON, no markdown, no explanation:\n" +
+                "{\"type\":\"cardiac_arrest|choking|bleeding|seizure|trauma|other\"," +
+                "\"summary\":\"max 10 words\",\"responders_needed\":2}\n" +
+                "Emergency: $sessionSummary"
+
+            val conv = activeConversation ?: return@withContext safeDefaults
+            val message = conv.sendMessage(prompt, emptyMap())
+            val raw = message.contents.contents
+                .filterIsInstance<com.google.ai.edge.litertlm.Content.Text>()
+                .joinToString("") { it.text }
+                .trim()
+
+            // Strip markdown code fences if present
+            val jsonStr = raw.replace(Regex("```[a-z]*\\n?"), "").replace("```", "").trim()
+            val j = org.json.JSONObject(jsonStr)
+
+            com.secondlife.mesh.MeshManager.EmergencyBroadcast(
+                severity          = severity,
+                type              = j.optString("type", "other"),
+                summary           = j.optString("summary", "Emergency assistance needed").take(60),
+                sessionId         = sessionId,
+                respondersNeeded  = j.optInt("responders_needed", 2).coerceIn(1, 4),
+                broadcasterLat    = broadcasterLat,
+                broadcasterLng    = broadcasterLng,
+                broadcasterAccuracy = 0f,
+            )
+        } catch (e: Exception) {
+            safeDefaults
+        }
+    }
+
     private fun closeActiveConversation() {
         val conv = activeConversation ?: return
         activeConversation = null
