@@ -1,7 +1,9 @@
 package com.secondlife.ui
 
 import android.graphics.Bitmap
+import com.secondlife.emergency.TimerState
 import com.secondlife.inference.EmergencySession
+import com.secondlife.inference.ResponseMode
 import com.secondlife.inference.SecondLifeResponse
 import com.secondlife.inference.TranscriptTurn
 
@@ -20,6 +22,11 @@ data class MainUiState(
     val error: String? = null,
     val sessions: List<EmergencySession> = emptyList(),
     val activeSessionId: String? = null,
+    val streamingText: String = "",
+    val timerState: TimerState? = null,
+    val metronomeBeat: Boolean = false,
+    val handoffReport: String? = null,
+    val selectedMode: ResponseMode = ResponseMode.PANIC,
 ) {
     val latestResponse: SecondLifeResponse?
         get() = transcript.lastOrNull { it.response != null }?.response
@@ -44,4 +51,9 @@ data class MainUiCallbacks(
     val onNewSession: () -> Unit = {},
     val onSelectSession: (String) -> Unit = {},
     val onDeleteSession: (String) -> Unit = {},
+    val onModeChange: (ResponseMode) -> Unit = {},
+    val onStopTimer: () -> Unit = {},
+    val onResetTimer: () -> Unit = {},
+    val onGenerateReport: () -> Unit = {},
+    val onDismissReport: () -> Unit = {},
 )

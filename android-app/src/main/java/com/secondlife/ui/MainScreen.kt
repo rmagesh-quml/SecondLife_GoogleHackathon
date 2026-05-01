@@ -14,6 +14,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,12 +41,15 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -81,7 +86,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.secondlife.audio.SpeechManager
 import com.secondlife.camera.CameraManager
+import com.secondlife.emergency.EmergencyTimerManager
 import com.secondlife.inference.EmergencySession
+import com.secondlife.inference.ResponseMode
 import com.secondlife.inference.SecondLifeResponse
 import com.secondlife.inference.SecondLifeViewModel
 import com.secondlife.inference.TranscriptTurn
@@ -129,6 +136,12 @@ fun MainScreen(
     val partialText    by speechManager.partialText.collectAsStateWithLifecycle()
     val rmsLevel       by speechManager.rmsLevel.collectAsStateWithLifecycle()
     val isSpeaking     by ttsManager.isSpeaking.collectAsStateWithLifecycle()
+    val modelReady     by viewModel.modelReady.collectAsStateWithLifecycle()
+    val streamingText  by viewModel.streamingText.collectAsStateWithLifecycle()
+    val timerState     by viewModel.timerState.collectAsStateWithLifecycle()
+    val metronomeBeat  by viewModel.metronomeBeat.collectAsStateWithLifecycle()
+    val handoffReport  by viewModel.handoffReport.collectAsStateWithLifecycle()
+    var selectedMode   by remember { mutableStateOf(ResponseMode.PANIC) }
 
     // Tick once per second to update the session timer without recomposing
     // the entire tree on every frame.
@@ -148,8 +161,8 @@ fun MainScreen(
 
     val state = MainUiState(
         role              = role,
-        isOnDevice        = true,
-        signalLabel       = "No signal",
+        isOnDevice        = modelReady,
+        signalLabel       = if (modelReady) "Ready" else "Loading…",
         sessionElapsedMs  = elapsed,
         rmsLevel          = rmsLevel,
         isListening       = isListening,
@@ -161,6 +174,11 @@ fun MainScreen(
         error             = error,
         sessions          = sessions,
         activeSessionId   = activeSession,
+        streamingText     = streamingText,
+        timerState        = timerState,
+        metronomeBeat     = metronomeBeat,
+        handoffReport     = handoffReport,
+        selectedMode      = selectedMode,
     )
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -193,8 +211,33 @@ fun MainScreen(
             viewModel.selectSession(id)
             scope.launch { drawerState.close() }
         },
-        onDeleteSession = viewModel::deleteSession,
+        onDeleteSession    = viewModel::deleteSession,
+        onModeChange       = { mode -> selectedMode = mode; viewModel.setMode(mode) },
+        onStopTimer        = { viewModel.stopTimer(); viewModel.stopMetronome() },
+        onResetTimer       = { viewModel.resetTimer(); viewModel.stopMetronome() },
+        onGenerateReport   = viewModel::generateHandoffReport,
+        onDismissReport    = viewModel::dismissHandoffReport,
     )
+
+    // Handoff report dialog
+    state.handoffReport?.let { report ->
+        AlertDialog(
+            onDismissRequest = callbacks.onDismissReport,
+            title = { Text("Handoff Report") },
+            text  = {
+                val scrollState = rememberScrollState()
+                Text(
+                    text     = report,
+                    style    = MaterialTheme.typography.bodySmall,
+                    color    = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.verticalScroll(scrollState),
+                )
+            },
+            confirmButton = {
+                Button(onClick = callbacks.onDismissReport) { Text("Close") }
+            },
+        )
+    }
 
     ModalNavigationDrawer(
         drawerState   = drawerState,
@@ -303,6 +346,31 @@ fun MainScreenContent(
                         }
                     }
                 }
+            }
+
+            // Timer / mode row above the action bar
+            Column(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 106.dp)
+                    .padding(horizontal = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                state.timerState?.let { timer ->
+                    TimerRow(
+                        timerState    = timer,
+                        metronomeBeat = state.metronomeBeat,
+                        onStop        = callbacks.onStopTimer,
+                        onReset       = callbacks.onResetTimer,
+                    )
+                }
+                ModeToggleRow(
+                    selectedMode     = state.selectedMode,
+                    hasResponse      = state.latestResponse != null,
+                    onModeChange     = callbacks.onModeChange,
+                    onGenerateReport = callbacks.onGenerateReport,
+                )
             }
 
             // Floating action bar pinned to the bottom of the screen.
@@ -772,6 +840,96 @@ private fun CitationChip(label: String) {
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+// ── Timer row ───────────────────────────────────────────────────────────────
+@Composable
+private fun TimerRow(
+    timerState:    com.secondlife.emergency.TimerState,
+    metronomeBeat: Boolean,
+    onStop:        () -> Unit,
+    onReset:       () -> Unit,
+) {
+    val ext = LocalSecondLifeColors.current
+    val pulseAlpha by animateFloatAsState(
+        targetValue   = if (metronomeBeat) 1f else 0.4f,
+        animationSpec = tween(150),
+        label         = "metronome-pulse",
+    )
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, ext.accentRed.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(ext.accentRed.copy(alpha = if (metronomeBeat) pulseAlpha else 0.8f))
+            )
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(
+                    text  = timerState.label.uppercase(Locale.US),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ext.textMuted,
+                )
+                Text(
+                    text  = EmergencyTimerManager.formatElapsed(timerState.elapsedMs),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = ext.accentRed,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = onReset) { Text("Reset", color = ext.textMuted, style = MaterialTheme.typography.labelMedium) }
+            TextButton(onClick = onStop)  { Text("Stop",  color = ext.accentRed,  style = MaterialTheme.typography.labelMedium) }
+        }
+    }
+}
+
+// ── Mode toggle + handoff report trigger ────────────────────────────────────
+@Composable
+private fun ModeToggleRow(
+    selectedMode:     com.secondlife.inference.ResponseMode,
+    hasResponse:      Boolean,
+    onModeChange:     (com.secondlife.inference.ResponseMode) -> Unit,
+    onGenerateReport: () -> Unit,
+) {
+    val ext = LocalSecondLifeColors.current
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment     = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            com.secondlife.inference.ResponseMode.entries.forEach { mode ->
+                val selected = mode == selectedMode
+                FilterChip(
+                    selected = selected,
+                    onClick  = { onModeChange(mode) },
+                    label    = {
+                        Text(
+                            text  = mode.name.lowercase().replaceFirstChar { it.uppercase() },
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    },
+                )
+            }
+        }
+        if (hasResponse) {
+            TextButton(onClick = onGenerateReport) {
+                Text("Report", color = ext.accentBlue, style = MaterialTheme.typography.labelMedium)
+            }
+        }
     }
 }
 

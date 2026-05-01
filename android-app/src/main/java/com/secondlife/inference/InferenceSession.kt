@@ -6,6 +6,8 @@ import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.secondlife.emergency.EmergencyRouter
+import com.secondlife.emergency.ProtocolCardCache
 import com.secondlife.rag.BM25Retriever
 import com.secondlife.rag.ProtocolChunk
 import kotlinx.coroutines.Dispatchers
@@ -26,10 +28,18 @@ class InferenceSession(
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading
 
+    // Populated with the final model output — useful for UI to show text as soon as inference completes.
+    private val _streamingText = MutableStateFlow("")
+    val streamingText: StateFlow<String> = _streamingText
+
+    // True once engine has finished initialising — drives the "Model ready" status indicator.
+    private val _modelReady = MutableStateFlow(false)
+    val modelReady: StateFlow<Boolean> = _modelReady
+
     private var engine: Engine? = null
 
-    // Persistent conversation — kept alive across queries so follow-ups
-    // retain context. Only reset via resetConversation() or role change.
+    // Persistent conversation — kept alive across queries so follow-ups retain context.
+    // Only reset via resetConversation() or role change.
     private var activeConversation: Conversation? = null
     private var isFirstTurn: Boolean = true
 
@@ -37,6 +47,47 @@ class InferenceSession(
     private val auditLog  = KotlinAuditLog()
 
     var currentRole: String = "layperson"
+    var currentMode: ResponseMode = ResponseMode.PANIC
+
+    // Hardcoded protocol chunks for the 9 most common emergencies — skip BM25 entirely.
+    private val protocolChunkCache: Map<EmergencyRouter.ProtocolId, ProtocolChunk> = mapOf(
+        EmergencyRouter.ProtocolId.SEIZURE to chunk("SEIZURE",
+            "Seizure: Clear area of hazards. Do not restrain. Do not put anything in mouth. " +
+            "Turn onto side (recovery position) if possible. Time the seizure. " +
+            "Call EMS if seizure lasts >5 minutes, second seizure follows, or patient is injured/pregnant."),
+        EmergencyRouter.ProtocolId.CHOKING_ADULT to chunk("CHOKING_ADULT",
+            "Adult choking: If coughing forcefully — let them cough. If silent/unable to breathe: " +
+            "lean forward, give 5 back blows (heel of hand between shoulder blades), " +
+            "then 5 abdominal thrusts (Heimlich). Alternate until clear. If unconscious: start CPR."),
+        EmergencyRouter.ProtocolId.CHOKING_INFANT to chunk("CHOKING_INFANT",
+            "Infant choking (<1 year): Face-down on forearm, head lower than chest. " +
+            "5 back blows with heel of hand. Flip face-up, 5 chest thrusts with 2 fingers. " +
+            "Look in mouth — remove only if visible. Repeat. If unconscious: infant CPR."),
+        EmergencyRouter.ProtocolId.SEVERE_BLEEDING to chunk("SEVERE_BLEEDING",
+            "Severe bleeding: Apply firm direct pressure immediately. Do not remove cloth. " +
+            "Elevate above heart if possible. Maintain pressure continuously. " +
+            "Tourniquet above wound for limb bleeding that won't stop."),
+        EmergencyRouter.ProtocolId.CPR to chunk("CPR",
+            "CPR: 30 chest compressions (100-120/min, 5-6cm depth, full recoil) + 2 rescue breaths. " +
+            "Push hard and fast on lower half of sternum. Use AED as soon as available. " +
+            "Continue until EMS arrives or AED ready."),
+        EmergencyRouter.ProtocolId.BURN to chunk("BURN",
+            "Burns: Cool running water for 20 minutes — do not use ice. " +
+            "Remove jewelry/clothing unless stuck. Cover loosely with cling film. " +
+            "Do not burst blisters. Large/facial/airway burns need immediate EMS."),
+        EmergencyRouter.ProtocolId.FRACTURE to chunk("FRACTURE",
+            "Fracture: Immobilize — do not straighten. Support above and below injury. " +
+            "Apply ice wrapped in cloth. Check CMS: circulation (pulse), motor (movement), sensation. " +
+            "No weight-bearing. Open fractures (bone visible): cover with clean dressing."),
+        EmergencyRouter.ProtocolId.ALLERGIC_REACTION to chunk("ALLERGIC_REACTION",
+            "Anaphylaxis: EpiPen outer mid-thigh now. Lay flat, raise legs (unless breathing difficulty). " +
+            "Call EMS immediately. Second EpiPen after 5-15 minutes if no improvement. " +
+            "Antihistamines/steroids are NOT first-line — epinephrine is."),
+        EmergencyRouter.ProtocolId.POISONING to chunk("POISONING",
+            "Poisoning: Do NOT induce vomiting unless Poison Control says so. " +
+            "Note substance, quantity, time, patient age/weight. Call Poison Control (1-800-222-1222 US). " +
+            "Keep awake, monitor breathing. Recovery position if unconscious but breathing."),
+    )
 
     // ── Init ──────────────────────────────────────────────────────────────────
 
@@ -46,6 +97,7 @@ class InferenceSession(
             val config = EngineConfig(modelPath = modelPath)
             engine = Engine(config)
             engine?.initialize()
+            _modelReady.value = true
         } catch (e: Exception) {
             _response.value = SecondLifeResponse(
                 response  = "Init Error: ${e.message}. Path: $modelPath",
@@ -64,44 +116,83 @@ class InferenceSession(
         image: Bitmap? = null,
     ) = withContext(Dispatchers.IO) {
         _isLoading.value = true
+        _streamingText.value = ""
         val startTime = System.currentTimeMillis()
 
         try {
-            val chunks = retriever.retrieve(text, topK = 1)
-            val prompt = buildPrompt(text, chunks, currentRole,
-                hasImage = image != null, isFirstTurn = isFirstTurn)
+            // 1. Classify deterministically — no model needed
+            val protocolId = EmergencyRouter.classify(text)
 
+            // 2. Emit instant protocol card response (<100ms) for known emergencies
+            val card = ProtocolCardCache.get(protocolId)
+            if (card != null) {
+                _response.value = SecondLifeResponse(
+                    response  = card.immediateSteps.mapIndexed { i, s -> "${i + 1}. $s" }.joinToString("\n"),
+                    citation  = "",
+                    latencyMs = System.currentTimeMillis() - startTime,
+                    role      = currentRole,
+                    mode      = ResponseMode.PANIC,
+                    steps     = card.immediateSteps,
+                    protocolId = protocolId.name,
+                )
+            }
+
+            // 3. Retrieve context — use cache for known protocols, BM25 for unknown
+            val chunks = if (protocolId != EmergencyRouter.ProtocolId.UNKNOWN) {
+                listOfNotNull(protocolChunkCache[protocolId])
+            } else {
+                retriever.retrieve(text, topK = 1)
+            }
+
+            // 4. Build mode-aware prompt
+            val prompt = if (currentMode == ResponseMode.PANIC) {
+                buildPanicPrompt(text, chunks, currentRole, hasImage = image != null)
+            } else {
+                buildDetailPrompt(text, chunks, currentRole, hasImage = image != null, isFirstTurn = isFirstTurn)
+            }
+
+            // 5. Run Gemma — reuse persistent conversation for follow-up turns
             val result = if (engine != null) {
-                // Create conversation on first turn, reuse on follow-ups
                 if (activeConversation == null) {
                     activeConversation = engine!!.createConversation()
                 }
                 val conversation = activeConversation!!
-                // sendMessage(String, Map) is the synchronous API — returns Message
                 val message = conversation.sendMessage(prompt, emptyMap())
                 isFirstTurn = false
-                // Extract all text parts from the response contents
-                message.contents.contents
+                val raw = message.contents.contents
                     .filterIsInstance<Content.Text>()
                     .joinToString("") { it.text }
                     .ifBlank { "No response generated" }
-                    .stripMarkdown()
+                if (currentMode == ResponseMode.DETAIL) raw.stripMarkdown() else raw
             } else {
-                "Model not initialized — check model file path"
+                "Model not initialized — showing protocol card guidance above."
             }
 
+            _streamingText.value = result
+
             val latency  = System.currentTimeMillis() - startTime
-            val citation = if (chunks.isNotEmpty())
+            val citation = if (chunks.isNotEmpty() && chunks[0].source != "protocol_cache")
                 "${chunks[0].source}, p.${chunks[0].page}"
             else ""
 
             auditLog.log(text, result, currentRole)
 
+            // 6. Parse JSON in panic mode; use raw text in detail mode
+            val finalResponse = if (currentMode == ResponseMode.PANIC) {
+                parseJsonOrFallback(result, card?.immediateSteps)
+            } else {
+                ParsedResponse(speak = result, steps = emptyList(), ask = null)
+            }
+
             _response.value = SecondLifeResponse(
-                response  = result,
-                citation  = citation,
-                latencyMs = latency,
-                role      = currentRole,
+                response       = finalResponse.speak,
+                citation       = citation,
+                latencyMs      = latency,
+                role           = currentRole,
+                mode           = currentMode,
+                steps          = finalResponse.steps.ifEmpty { card?.immediateSteps ?: emptyList() },
+                followUpQuestion = finalResponse.ask,
+                protocolId     = protocolId.name,
             )
         } catch (e: Exception) {
             _response.value = SecondLifeResponse(
@@ -112,6 +203,7 @@ class InferenceSession(
             )
         } finally {
             _isLoading.value = false
+            _streamingText.value = ""
         }
     }
 
@@ -134,11 +226,37 @@ class InferenceSession(
     fun release() {
         closeActiveConversation()
         engine = null
+        _modelReady.value = false
     }
 
-    // ── Prompt ────────────────────────────────────────────────────────────────
+    // ── Prompt builders ───────────────────────────────────────────────────────
 
-    private fun buildPrompt(
+    // Panic mode: compact JSON, 60-120 token output, no explanations
+    private fun buildPanicPrompt(
+        query: String,
+        chunks: List<ProtocolChunk>,
+        role: String,
+        hasImage: Boolean,
+    ): String {
+        val roleInstructions = when (role) {
+            "paramedic"      -> "Clinical language. Include dosages if relevant."
+            "military_medic" -> "TCCC. MARCH order. Austere environment assumed."
+            else             -> "Plain English only. No jargon."
+        }
+        val contextLine = chunks.firstOrNull()?.text?.take(300) ?: ""
+        val imageNote   = if (hasImage) " Visual scene available." else ""
+        return """[PANIC MODE]$imageNote
+$roleInstructions
+Protocol context: $contextLine
+
+Emergency: $query
+
+Respond ONLY with valid JSON — no other text before or after:
+{"speak":"<25 words max, most critical action first>","steps":["step 1","step 2","step 3"],"ask":"<one follow-up question>"}"""
+    }
+
+    // Detail mode: full context, numbered steps with role-appropriate explanations
+    private fun buildDetailPrompt(
         query: String,
         chunks: List<ProtocolChunk>,
         role: String,
@@ -180,8 +298,6 @@ class InferenceSession(
             "\n--- End reference ---"
         } else ""
 
-        // Query comes FIRST so the model anchors on the actual emergency,
-        // not the RAG context. Context follows as optional background only.
         return if (isFirstTurn) {
             "$instruction$imageNote\n\nEmergency situation: $query\n$contextBlock\n\nImmediate steps:"
         } else {
@@ -189,13 +305,37 @@ class InferenceSession(
         }
     }
 
+    // ── JSON parsing ──────────────────────────────────────────────────────────
+
+    private data class ParsedResponse(val speak: String, val steps: List<String>, val ask: String?)
+
+    private fun parseJsonOrFallback(raw: String, fallbackSteps: List<String>?): ParsedResponse {
+        return try {
+            val json = raw
+                .substringAfter("```json").substringAfter("```").substringBefore("```")
+                .trim()
+                .let { if (it.startsWith("{")) it else raw.trim() }
+            val obj  = JSONObject(json)
+            val speak = obj.optString("speak", "").ifBlank { raw }
+            val stepsArr = obj.optJSONArray("steps")
+            val steps = if (stepsArr != null) (0 until stepsArr.length()).map { stepsArr.getString(it) }
+                        else emptyList()
+            val ask = obj.optString("ask", "").ifBlank { null }
+            ParsedResponse(speak, steps, ask)
+        } catch (_: Exception) {
+            ParsedResponse(speak = raw, steps = fallbackSteps ?: emptyList(), ask = null)
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /** Strip markdown so the model's **bold** and *italic* render as plain text on screen. */
+    private fun chunk(id: String, text: String) =
+        ProtocolChunk(id = id, text = text, source = "protocol_cache", page = 0)
+
     private fun String.stripMarkdown(): String =
-        this.replace(Regex("\\*{1,3}([^*]+)\\*{1,3}"), "$1")   // **bold**, *italic*, ***both***
-            .replace(Regex("#{1,6}\\s*"), "")                    // ## headings
-            .replace(Regex("`{1,3}([^`]*)`{1,3}"), "$1")        // `code`
+        this.replace(Regex("\\*{1,3}([^*]+)\\*{1,3}"), "$1")
+            .replace(Regex("#{1,6}\\s*"), "")
+            .replace(Regex("`{1,3}([^`]*)`{1,3}"), "$1")
             .trim()
 
     // ── Audit log ─────────────────────────────────────────────────────────────
@@ -212,7 +352,7 @@ class InferenceSession(
         fun log(query: String, response: String, role: String) {
             val timestamp = System.currentTimeMillis()
             val prevHash  = if (chain.isEmpty()) GENESIS_HASH else chain.last().hash
-            val body      = JSONObject().apply {
+            val body = JSONObject().apply {
                 put("prev_hash", prevHash); put("query", query)
                 put("response", response); put("role", role); put("timestamp", timestamp)
             }
@@ -236,8 +376,7 @@ class InferenceSession(
         }
 
         private fun sortedJson(obj: JSONObject): String =
-            obj.keys().asSequence().sorted()
-                .joinToString("") { key -> "$key${obj.get(key)}" }
+            obj.keys().asSequence().sorted().joinToString("") { "$it${obj.get(it)}" }
 
         private fun sha256(input: String): String =
             MessageDigest.getInstance("SHA-256")

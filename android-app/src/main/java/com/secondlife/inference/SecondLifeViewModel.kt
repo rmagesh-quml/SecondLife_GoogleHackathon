@@ -4,6 +4,10 @@ import android.app.Application
 import android.graphics.Bitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.secondlife.emergency.EmergencyRouter
+import com.secondlife.emergency.EmergencyTimerManager
+import com.secondlife.emergency.ProtocolCardCache
+import com.secondlife.emergency.TimerState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -37,7 +41,9 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
     private val protocolsPath = resolveProtocolsPath(application)
     private val session       = InferenceSession(application, modelPath, protocolsPath)
 
-    val isLoading: StateFlow<Boolean> = session.isLoading
+    val isLoading:     StateFlow<Boolean> = session.isLoading
+    val modelReady:    StateFlow<Boolean> = session.modelReady
+    val streamingText: StateFlow<String>  = session.streamingText
 
     // Captured camera frame — staged across queries until cleared.
     private val _capturedImage = MutableStateFlow<Bitmap?>(null)
@@ -45,6 +51,15 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
+
+    // Handoff report generated async — never blocks the emergency path.
+    private val _handoffReport = MutableStateFlow<String?>(null)
+    val handoffReport: StateFlow<String?> = _handoffReport.asStateFlow()
+
+    // Native timers / CPR metronome — all off the model path.
+    val timerManager = EmergencyTimerManager(viewModelScope)
+    val timerState:    StateFlow<TimerState?> = timerManager.timerState
+    val metronomeBeat: StateFlow<Boolean>     = timerManager.metronomeBeat
 
     // ── Sessions ────────────────────────────────────────────────────────────
     private val initialSession = EmergencySession()
@@ -76,6 +91,7 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         transcript.stateInMappedToResponse()
 
     init {
+        // Preload model at app start — not on first query.
         viewModelScope.launch { session.initModel() }
     }
 
@@ -95,6 +111,7 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         session.currentRole     = s.role
         session.resetConversation()
         _capturedImage.value    = null
+        _handoffReport.value    = null
     }
 
     fun selectSession(id: String) {
@@ -123,12 +140,48 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         session.currentRole = role
     }
 
+    fun setMode(mode: ResponseMode) {
+        session.currentMode = mode
+    }
+
     /** Stop in-flight TTS / listening. Does NOT delete the session. */
     fun cancelSession() {
         _capturedImage.value = null
     }
 
-    // ── Query ───────────────────────────────────────────────────────────────
+    // ── Timer / metronome ────────────────────────────────────────────────────
+    fun stopTimer()    = timerManager.stopTimer()
+    fun resetTimer()   = timerManager.resetTimer()
+    fun stopMetronome() = timerManager.stopMetronome()
+
+    // ── Handoff report ───────────────────────────────────────────────────────
+
+    /** Build a handoff report from the latest response. Call only on explicit user tap. */
+    fun generateHandoffReport() {
+        val r = response.value ?: return
+        viewModelScope.launch {
+            val report = buildString {
+                appendLine("=== SecondLife Handoff Report ===")
+                appendLine("Time: ${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US).format(java.util.Date(r.timestamp))}")
+                appendLine("Role: ${r.role.replace("_", " ").replaceFirstChar { it.uppercase() }}")
+                appendLine("Protocol: ${r.protocolId ?: "General"}")
+                appendLine()
+                appendLine("Steps taken:")
+                r.steps.forEachIndexed { i, step -> appendLine("  ${i + 1}. $step") }
+                if (r.steps.isEmpty()) appendLine("  ${r.response}")
+                appendLine()
+                if (r.citation.isNotBlank()) appendLine("Source: ${r.citation}")
+                appendLine("Response time: ${r.latencyMs} ms")
+                r.followUpQuestion?.let { appendLine("Pending assessment: $it") }
+            }
+            _handoffReport.value = report
+        }
+    }
+
+    fun dismissHandoffReport() { _handoffReport.value = null }
+
+    // ── Query ────────────────────────────────────────────────────────────────
+
     /**
      * Run a query on the *active* session. Captures the active id at dispatch
      * time so switching sessions while the model is thinking still routes the
@@ -136,6 +189,7 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
      */
     fun query(text: String, audio: Any? = null) {
         if (text.isBlank()) return
+        _handoffReport.value = null
         val capturedId  = _activeSessionId.value
         val pendingTurn = TranscriptTurn(userText = text, response = null)
 
@@ -153,6 +207,7 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             session.respond(text, audio = audio, image = image)
             val completed = session.response.value ?: return@launch
+
             _sessions.value = _sessions.value.map { sess ->
                 if (sess.id != capturedId) return@map sess
                 sess.copy(
@@ -161,6 +216,16 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
                     }
                 )
             }
+
+            // Auto-start native timer for protocols that need one — no model involved.
+            val protocolId = completed.protocolId?.let {
+                runCatching { EmergencyRouter.ProtocolId.valueOf(it) }.getOrNull()
+            }
+            val card = protocolId?.let { ProtocolCardCache.get(it) }
+            card?.timerLabel?.let { label ->
+                if (protocolId == EmergencyRouter.ProtocolId.CPR) timerManager.startMetronome()
+                else timerManager.startTimer(label)
+            }
         }
     }
 
@@ -168,6 +233,7 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
 
     override fun onCleared() {
         super.onCleared()
+        timerManager.release()
         session.release()
     }
 
@@ -181,11 +247,9 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     private fun StateFlow<List<TranscriptTurn>>.stateInMappedToResponse(): StateFlow<SecondLifeResponse?> {
-        return kotlinx.coroutines.flow.MutableStateFlow<SecondLifeResponse?>(null).also { out ->
+        return MutableStateFlow<SecondLifeResponse?>(null).also { out ->
             viewModelScope.launch {
-                collect { turns ->
-                    out.value = turns.lastOrNull { it.response != null }?.response
-                }
+                collect { turns -> out.value = turns.lastOrNull { it.response != null }?.response }
             }
         }
     }
