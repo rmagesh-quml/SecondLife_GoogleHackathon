@@ -122,19 +122,25 @@ class InferenceSession(
         try {
             // 1. Classify deterministically — no model needed
             val protocolId = EmergencyRouter.classify(text)
-
-            // 2. Emit instant protocol card response (<100ms) for known emergencies
             val card = ProtocolCardCache.get(protocolId)
-            if (card != null) {
+
+            // 2. Fast path: known protocol + first turn → return card instantly, skip Gemma.
+            //    Gemma only runs for unknown emergencies or follow-up questions.
+            if (card != null && isFirstTurn && image == null) {
+                isFirstTurn = false
+                val steps = card.immediateSteps
+                val response = steps.mapIndexed { i, s -> "${i + 1}. $s" }.joinToString("\n")
+                auditLog.log(text, response, currentRole)
                 _response.value = SecondLifeResponse(
-                    response  = card.immediateSteps.mapIndexed { i, s -> "${i + 1}. $s" }.joinToString("\n"),
-                    citation  = "",
-                    latencyMs = System.currentTimeMillis() - startTime,
-                    role      = currentRole,
-                    mode      = ResponseMode.PANIC,
-                    steps     = card.immediateSteps,
+                    response   = response,
+                    citation   = "",
+                    latencyMs  = System.currentTimeMillis() - startTime,
+                    role       = currentRole,
+                    mode       = currentMode,
+                    steps      = steps,
                     protocolId = protocolId.name,
                 )
+                return@withContext
             }
 
             // 3. Retrieve context — use cache for known protocols, BM25 for unknown
@@ -185,14 +191,14 @@ class InferenceSession(
             }
 
             _response.value = SecondLifeResponse(
-                response       = finalResponse.speak,
-                citation       = citation,
-                latencyMs      = latency,
-                role           = currentRole,
-                mode           = currentMode,
-                steps          = finalResponse.steps.ifEmpty { card?.immediateSteps ?: emptyList() },
+                response         = finalResponse.speak,
+                citation         = citation,
+                latencyMs        = latency,
+                role             = currentRole,
+                mode             = currentMode,
+                steps            = finalResponse.steps.ifEmpty { card?.immediateSteps ?: emptyList() },
                 followUpQuestion = finalResponse.ask,
-                protocolId     = protocolId.name,
+                protocolId       = protocolId.name,
             )
         } catch (e: Exception) {
             _response.value = SecondLifeResponse(
