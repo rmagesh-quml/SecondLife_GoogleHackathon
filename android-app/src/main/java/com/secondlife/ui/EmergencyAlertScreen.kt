@@ -1,5 +1,6 @@
 package com.secondlife.ui
 
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -16,6 +17,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -24,8 +26,12 @@ import androidx.compose.ui.unit.sp
 import com.secondlife.mesh.MeshManager
 
 /**
- * Full-screen overlay shown to a bystander (Person B) when their device
- * detects a nearby SecondLife SOS broadcast. They can accept to help or dismiss.
+ * Full-screen takeover alert for Person B when a nearby SOS is detected.
+ *
+ * Design goals:
+ *  • Can't be missed — full screen, no card, strobing red background
+ *  • Works in direct sunlight on an S25 Ultra — very high contrast
+ *  • Accept button is enormous — easy to tap when panicking
  */
 @Composable
 fun EmergencyAlertScreen(
@@ -34,132 +40,226 @@ fun EmergencyAlertScreen(
     onAccept: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    // Pulsing red ring animation to convey urgency
-    val pulse = rememberInfiniteTransition(label = "alertPulse")
-    val ringScale by pulse.animateFloat(
-        initialValue = 1f,
-        targetValue  = 1.25f,
-        animationSpec = infiniteRepeatable(tween(700, easing = LinearEasing), RepeatMode.Reverse),
-        label = "ringScale",
+    val inf = rememberInfiniteTransition(label = "alert")
+
+    // Strobe: background pulses between almost-black and deep red
+    val bgAlpha by inf.animateFloat(
+        initialValue  = 0.08f,
+        targetValue   = 0.28f,
+        animationSpec = infiniteRepeatable(
+            tween(600, easing = FastOutSlowInEasing),
+            RepeatMode.Reverse,
+        ),
+        label = "bgStrobe",
+    )
+
+    // SOS ring: slow breathe
+    val ringScale by inf.animateFloat(
+        initialValue  = 1f,
+        targetValue   = 1.35f,
+        animationSpec = infiniteRepeatable(
+            tween(900, easing = LinearEasing),
+            RepeatMode.Reverse,
+        ),
+        label = "ring",
+    )
+
+    // Outer strobe ring
+    val outerScale by inf.animateFloat(
+        initialValue  = 1f,
+        targetValue   = 1.65f,
+        animationSpec = infiniteRepeatable(
+            tween(1200, easing = LinearEasing),
+            RepeatMode.Reverse,
+        ),
+        label = "outerRing",
     )
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xDD0A0A0A)),   // dark translucent overlay
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color(0xFF1A0000).copy(alpha = 1f),
+                        Color(0xFF0A0000),
+                    )
+                )
+            )
+            // Red strobe overlay
+            .background(Color(0xFFFF0000).copy(alpha = bgAlpha)),
         contentAlignment = Alignment.Center,
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier
-                .fillMaxWidth(0.9f)
-                .background(Color(0xFF1C1C1E), RoundedCornerShape(24.dp))
-                .padding(28.dp),
+                .fillMaxSize()
+                .padding(horizontal = 24.dp)
+                .padding(top = 64.dp, bottom = 32.dp),
         ) {
-            // Pulsing SOS icon
-            Box(contentAlignment = Alignment.Center) {
-                Box(
-                    modifier = Modifier
-                        .size(90.dp)
-                        .scale(ringScale)
-                        .background(Color(0x33FF3B30), CircleShape)
+
+            // ── TOP SECTION: Icon + title ─────────────────────────────────────
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+
+                // Triple-ring pulsing icon
+                Box(contentAlignment = Alignment.Center) {
+                    // Outer slow ring
+                    Box(
+                        Modifier
+                            .size(160.dp)
+                            .scale(outerScale)
+                            .background(Color(0xFFFF0000).copy(alpha = 0.10f), CircleShape)
+                    )
+                    // Middle ring
+                    Box(
+                        Modifier
+                            .size(120.dp)
+                            .scale(ringScale)
+                            .background(Color(0xFFFF0000).copy(alpha = 0.22f), CircleShape)
+                    )
+                    // Solid core
+                    Box(
+                        Modifier
+                            .size(88.dp)
+                            .background(Color(0xFFFF1A00), CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text("🚨", fontSize = 40.sp)
+                    }
+                }
+
+                Text(
+                    "EMERGENCY NEARBY",
+                    color         = Color(0xFFFF3B30),
+                    fontWeight    = FontWeight.Black,
+                    fontSize      = 26.sp,
+                    letterSpacing = 3.sp,
+                    textAlign     = TextAlign.Center,
                 )
-                Box(
-                    modifier = Modifier
-                        .size(70.dp)
-                        .background(Color(0xFFFF3B30), CircleShape),
-                    contentAlignment = Alignment.Center,
+
+                // Emergency type badge
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF3A0A0A),
                 ) {
-                    Text("🆘", fontSize = 32.sp)
+                    Text(
+                        broadcast.type.replace("_", " ").uppercase(),
+                        modifier      = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
+                        color         = Color(0xFFFF6B6B),
+                        fontWeight    = FontWeight.ExtraBold,
+                        fontSize      = 15.sp,
+                        letterSpacing = 2.sp,
+                    )
                 }
             }
 
-            Text(
-                "EMERGENCY NEARBY",
-                color      = Color(0xFFFF3B30),
-                fontWeight = FontWeight.ExtraBold,
-                fontSize   = 20.sp,
-                letterSpacing = 2.sp,
-            )
-
-            // Emergency type badge
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = Color(0xFF2C1B1B),
+            // ── MIDDLE SECTION: What happened + signal ────────────────────────
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 Text(
-                    broadcast.type.replace("_", " ").uppercase(),
-                    modifier  = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                    color     = Color(0xFFFF6B6B),
+                    broadcast.summary,
+                    color      = Color.White,
+                    fontSize   = 22.sp,
                     fontWeight = FontWeight.Bold,
-                    fontSize  = 13.sp,
-                    letterSpacing = 1.sp,
+                    textAlign  = TextAlign.Center,
+                    lineHeight = 30.sp,
                 )
+
+                // Signal strength with bars
+                val strength = rssiLabelToStrength(rssiLabel)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    SignalBars(strength = strength, barColor = Color(0xFF30D158))
+                    Text(
+                        rssiLabel,
+                        color      = Color(0xFF30D158),
+                        fontSize   = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        "Move toward stronger signal to navigate",
+                        color    = Color(0xFF777777),
+                        fontSize = 13.sp,
+                    )
+                }
             }
 
-            // What happened
-            Text(
-                broadcast.summary,
-                color     = Color.White,
-                fontSize  = 17.sp,
-                fontWeight = FontWeight.Medium,
-                textAlign = TextAlign.Center,
-                lineHeight = 24.sp,
-            )
-
-            // Distance estimate from RSSI
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
+            // ── BOTTOM SECTION: Action buttons ────────────────────────────────
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Box(Modifier.size(8.dp).background(Color(0xFF30D158), CircleShape))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    rssiLabel,
-                    color    = Color(0xFF30D158),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                )
+                Button(
+                    onClick  = onAccept,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(68.dp),
+                    shape  = RoundedCornerShape(18.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF1DB954),
+                        contentColor   = Color.Black,
+                    ),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp),
+                ) {
+                    Text(
+                        "🧭  I'll Help — Find Them",
+                        fontWeight = FontWeight.Black,
+                        fontSize   = 18.sp,
+                    )
+                }
+
+                TextButton(onClick = onDismiss) {
+                    Text(
+                        "I cannot help right now",
+                        color    = Color(0xFF555555),
+                        fontSize = 14.sp,
+                    )
+                }
             }
+        }
+    }
+}
 
-            Text(
-                "Someone needs your help right now.\nYou can guide them to safety.",
-                color     = Color(0xFFAAAAAA),
-                fontSize  = 13.sp,
-                textAlign = TextAlign.Center,
-                lineHeight = 20.sp,
-            )
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
-            Spacer(Modifier.height(4.dp))
+/** Convert RSSI label to 0-5 bar count. */
+internal fun rssiLabelToStrength(label: String): Int = when {
+    label.startsWith("Very close") -> 5
+    label.startsWith("Close")      -> 4
+    label.startsWith("Nearby")     -> 3
+    label.startsWith("In range")   -> 2
+    label.startsWith("Far")        -> 1
+    else                           -> 0
+}
 
-            // Accept button
-            Button(
-                onClick = onAccept,
+/** WiFi-style signal strength bars. */
+@Composable
+fun SignalBars(strength: Int, barColor: Color, modifier: Modifier = Modifier) {
+    Row(
+        modifier            = modifier,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        verticalAlignment   = Alignment.Bottom,
+    ) {
+        for (i in 1..5) {
+            val filled = i <= strength
+            val barHeight = (8 + i * 8).dp
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(54.dp),
-                shape  = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF30D158),
-                    contentColor   = Color.Black,
-                ),
-            ) {
-                Text(
-                    "🧭  I'll Help — Navigate to Them",
-                    fontWeight = FontWeight.Bold,
-                    fontSize   = 15.sp,
-                )
-            }
-
-            // Dismiss button
-            TextButton(onClick = onDismiss) {
-                Text(
-                    "I can't help right now",
-                    color    = Color(0xFF666666),
-                    fontSize = 13.sp,
-                )
-            }
+                    .width(14.dp)
+                    .height(barHeight)
+                    .background(
+                        if (filled) barColor else barColor.copy(alpha = 0.18f),
+                        RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp),
+                    )
+            )
         }
     }
 }

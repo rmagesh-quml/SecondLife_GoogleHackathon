@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -207,6 +208,38 @@ class MainActivity : ComponentActivity() {
                             speechManager = speechManager,
                             cameraManager = cameraManager,
                         )
+
+                        // ── SOS vibration — fires once when alert appears ────
+                        LaunchedEffect(nearbyEmergency != null) {
+                            if (nearbyEmergency != null) {
+                                @Suppress("DEPRECATION")
+                                val vibrator: android.os.Vibrator = if (Build.VERSION.SDK_INT >= 31) {
+                                    getSystemService(android.os.VibratorManager::class.java).defaultVibrator
+                                } else {
+                                    @Suppress("DEPRECATION")
+                                    getSystemService(android.os.Vibrator::class.java)
+                                }
+                                // SOS morse: · · ·  — — —  · · ·
+                                val timings = longArrayOf(
+                                    0,
+                                    120, 80, 120, 80, 120, 220,   // · · ·
+                                    360, 80, 360, 80, 360, 220,   // — — —
+                                    120, 80, 120, 80, 120, 600,   // · · ·
+                                    // Repeat once
+                                    120, 80, 120, 80, 120, 220,
+                                    360, 80, 360, 80, 360, 220,
+                                    120, 80, 120, 80, 120, 0,
+                                )
+                                if (Build.VERSION.SDK_INT >= 26) {
+                                    vibrator.vibrate(
+                                        android.os.VibrationEffect.createWaveform(timings, -1)
+                                    )
+                                } else {
+                                    @Suppress("DEPRECATION")
+                                    vibrator.vibrate(timings, -1)
+                                }
+                            }
+                        }
 
                         // ── Person B: Incoming SOS alert overlay ─────────────
                         nearbyEmergency?.let { broadcast ->
