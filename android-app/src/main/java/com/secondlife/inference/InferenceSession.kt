@@ -225,9 +225,10 @@ class InferenceSession(
             val protocolId = EmergencyRouter.classify(text)
             val card = ProtocolCardCache.get(protocolId)
 
-            // 2. Fast path: known protocol + first turn → return card instantly, skip Gemma.
-            //    Gemma only runs for unknown emergencies or follow-up questions.
-            if (card != null && isFirstTurn && image == null) {
+            // 2. Fast path: known protocol + first turn + layperson role → return card instantly.
+            //    Paramedics and military medics always run Gemma so they get role-specific
+            //    clinical language (TCCC, MARCH, dosages) rather than plain-English card steps.
+            if (card != null && isFirstTurn && image == null && currentRole == "layperson") {
                 isFirstTurn = false
                 val steps = card.immediateSteps
                 val response = steps.mapIndexed { i, s -> "${i + 1}. $s" }.joinToString("\n")
@@ -324,13 +325,23 @@ class InferenceSession(
                 ParsedResponse(speak = result, steps = emptyList(), ask = null)
             }
 
+            // For non-layperson roles in DETAIL mode, Gemma has already produced
+            // role-specific text in `finalResponse.speak`. Don't overwrite it with
+            // hardcoded layperson card steps — that would cause TTS to speak the wrong
+            // language. Only fall back to card steps for layperson (fast-path excluded
+            // them, but this covers PANIC mode fallback and edge cases).
+            val resolvedSteps = finalResponse.steps.ifEmpty {
+                if (currentRole == "layperson") card?.immediateSteps ?: emptyList()
+                else emptyList()
+            }
+
             _response.value = SecondLifeResponse(
                 response         = finalResponse.speak,
                 citation         = citation,
                 latencyMs        = latency,
                 role             = currentRole,
                 mode             = currentMode,
-                steps            = finalResponse.steps.ifEmpty { card?.immediateSteps ?: emptyList() },
+                steps            = resolvedSteps,
                 followUpQuestion = finalResponse.ask,
                 protocolId       = protocolId.name,
             )
@@ -484,7 +495,9 @@ The "speak" field must describe the actual emergency actions, not generic phrase
         return if (isFirstTurn) {
             "$instruction$imageNote\n\nEmergency situation: $query\n$contextBlock\n\nImmediate steps:"
         } else {
-            "Follow-up: $query\n\nContinue with specific steps for this exact emergency:"
+            // Re-inject role instruction so professional roles maintain clinical language
+            // through the entire conversation, not just the first turn.
+            "$instruction\n\nFollow-up: $query\n\nContinue with specific steps for this exact emergency:"
         }
     }
 
