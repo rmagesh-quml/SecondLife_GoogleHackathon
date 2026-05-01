@@ -98,14 +98,38 @@ class InferenceSession(
 
     suspend fun initModel() = withContext(Dispatchers.IO) {
         if (engine != null) return@withContext
+
+        // Fast-fail: tell the user immediately if the model file is missing.
+        // Common cause of "Loading…" forever on a second device.
+        val modelFile = java.io.File(modelPath)
+        if (!modelFile.exists()) {
+            android.util.Log.e("InferenceSession",
+                "Model file NOT FOUND at $modelPath — protocol cards will work offline; AI responses unavailable.")
+            _response.value = SecondLifeResponse(
+                response  = "⚠️ Model file not found at:\n$modelPath\n\n" +
+                            "Protocol cards work without the model. Copy the .litertlm file to the device to enable AI responses.",
+                citation  = "",
+                latencyMs = 0,
+                role      = currentRole,
+            )
+            // Mark ready so the app is fully usable with protocol-card fallback
+            _modelReady.value = true
+            return@withContext
+        }
+
         try {
+            android.util.Log.i("InferenceSession", "Loading model from $modelPath (${modelFile.length() / 1_048_576} MB)…")
             val config = EngineConfig(modelPath = modelPath)
             engine = Engine(config)
             engine?.initialize()
             _modelReady.value = true
+            android.util.Log.i("InferenceSession", "Model loaded successfully ✓")
         } catch (e: Exception) {
+            android.util.Log.e("InferenceSession", "Model init failed: ${e.message}", e)
+            // Mark ready so the app still works with protocol-card fallback
+            _modelReady.value = true
             _response.value = SecondLifeResponse(
-                response  = "Init Error: ${e.message}. Path: $modelPath",
+                response  = "⚠️ Model failed to load: ${e.message}\n\nProtocol cards are available offline.",
                 citation  = "",
                 latencyMs = 0,
                 role      = currentRole,

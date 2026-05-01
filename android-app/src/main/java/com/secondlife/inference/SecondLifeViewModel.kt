@@ -133,6 +133,19 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         // Model loading is started by SecondLifeApplication.onCreate() — nothing to do here.
         // Always passively scan so Person B gets alerts automatically.
         meshManager.startScanning()
+        // Restart scanning every 30 s — Nearby Connections can silently drop discovery
+        // after a few minutes, especially post-inference. This keeps the second phone
+        // reliably receiving broadcasts even if the first attempt failed or timed out.
+        viewModelScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(30_000L)
+                if (!_isResponder.value) {          // don't interrupt active navigation
+                    meshManager.stopScanning()
+                    kotlinx.coroutines.delay(500L)   // give Nearby time to fully stop
+                    meshManager.startScanning()
+                }
+            }
+        }
     }
 
     // ── Camera ──────────────────────────────────────────────────────────────
@@ -251,10 +264,6 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
 
         val image = _capturedImage.value
         viewModelScope.launch {
-            // Pause BLE scanning during inference — reduces thermal pressure on Snapdragon.
-            // Nearby Connections + LLM simultaneously causes throttling on the S25 Ultra.
-            meshManager.stopScanning()
-            try {
             session.respond(text, audio = audio, image = image)
             val completed = session.response.value ?: return@launch
 
@@ -275,10 +284,6 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
             card?.timerLabel?.let { label ->
                 if (protocolId == EmergencyRouter.ProtocolId.CPR) timerManager.startMetronome()
                 else timerManager.startTimer(label, hint = card.timerHint)
-            }
-            } finally {
-                // Always resume scanning after inference completes or fails.
-                meshManager.startScanning()
             }
         }
     }

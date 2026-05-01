@@ -199,21 +199,38 @@ class MeshManager(
     // ── Scanner side (Person B — the bystander) ───────────────────────────────
 
     fun startScanning() {
-        Log.d(TAG, "🔍 Passive BLE scan started — listening for nearby SOS (no internet needed)")
+        Log.d(TAG, "🔍 BLE scan starting — listening for nearby SOS")
         val options = DiscoveryOptions.Builder()
             .setStrategy(STRATEGY)
             .build()
 
         connectionsClient.startDiscovery(SERVICE_ID, endpointDiscoveryCallback, options)
-            .addOnSuccessListener { Log.d(TAG, "✅ BLE scan active") }
+            .addOnSuccessListener {
+                Log.i(TAG, "✅ BLE scan active — ready to receive SOS broadcasts")
+                _isScanActive = true
+            }
             .addOnFailureListener { e ->
-                // Fails silently if already scanning or Bluetooth is off.
-                // Rest of the app works fine — mesh is just unavailable.
-                Log.w(TAG, "Scan start failed (Bluetooth off?): ${e.message}")
+                _isScanActive = false
+                // STATUS_ALREADY_DISCOVERING (8012) is fine — scan is already running.
+                val code = (e as? com.google.android.gms.common.api.ApiException)?.statusCode
+                if (code == 8012) {
+                    Log.d(TAG, "Already scanning — no restart needed")
+                    _isScanActive = true
+                } else {
+                    Log.e(TAG, "❌ BLE scan FAILED (code=$code): ${e.message}. " +
+                        "Is Bluetooth on? Location permission granted?")
+                }
             }
     }
 
+    /** True while startDiscovery has succeeded and stopDiscovery has not been called. */
+    var isScanActive: Boolean = false
+        get() = _isScanActive
+        private set
+    private var _isScanActive = false
+
     fun stopScanning() {
+        _isScanActive = false
         connectionsClient.stopDiscovery()
     }
 
