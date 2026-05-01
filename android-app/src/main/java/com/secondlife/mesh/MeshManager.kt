@@ -212,10 +212,10 @@ class MeshManager(
             }
             .addOnFailureListener { e ->
                 _isScanActive = false
-                // STATUS_ALREADY_DISCOVERING (8012) is fine — scan is already running.
                 val code = (e as? com.google.android.gms.common.api.ApiException)?.statusCode
-                if (code == 8012) {
-                    Log.d(TAG, "Already scanning — no restart needed")
+                if (code == 8002) {
+                    // STATUS_ALREADY_DISCOVERING — scan is already running, nothing to do.
+                    Log.d(TAG, "Already discovering — scan already active")
                     _isScanActive = true
                 } else {
                     Log.e(TAG, "❌ BLE scan FAILED (code=$code): ${e.message}. " +

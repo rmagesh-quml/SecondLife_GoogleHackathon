@@ -140,9 +140,12 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             while (true) {
                 kotlinx.coroutines.delay(30_000L)
-                if (!_isResponder.value) {          // don't interrupt active navigation
+                // Skip restart if broadcasting (Phone 1 must stay advertise-only — P2P_STAR
+                // breaks when the same device both advertises and discovers simultaneously)
+                // or if navigating as a responder.
+                if (!_isResponder.value && !_isBroadcasting.value) {
                     meshManager.stopScanning()
-                    kotlinx.coroutines.delay(500L)   // give Nearby time to fully stop
+                    kotlinx.coroutines.delay(500L)
                     meshManager.startScanning()
                 }
             }

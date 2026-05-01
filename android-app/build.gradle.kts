@@ -55,6 +55,7 @@ dependencies {
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.material)
     implementation(libs.litertlm.android)
+    implementation(libs.litert)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.camera2)
