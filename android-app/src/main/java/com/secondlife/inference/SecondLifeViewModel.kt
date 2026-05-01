@@ -144,9 +144,13 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         session.currentMode = mode
     }
 
-    /** Stop in-flight TTS / listening. Does NOT delete the session. */
+    /** Stop TTS / listening, clear image, stop timers, reset conversation. */
     fun cancelSession() {
-        _capturedImage.value = null
+        _capturedImage.value  = null
+        _handoffReport.value  = null
+        timerManager.stopTimer()
+        timerManager.stopMetronome()
+        session.resetConversation()
     }
 
     // ── Timer / metronome ────────────────────────────────────────────────────
