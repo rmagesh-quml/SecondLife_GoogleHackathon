@@ -319,18 +319,33 @@ class MainActivity : ComponentActivity() {
         sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
             sensorManager.registerListener(shakeListener, it, SensorManager.SENSOR_DELAY_UI)
         }
+        
+        // Re-initialize model if it was hibernated
+        if (viewModel.modelReady.value == false) {
+            lifecycleScope.launch {
+                (application as com.secondlife.SecondLifeApplication).inferenceSession.initModel()
+            }
+        }
     }
 
     override fun onPause() {
         super.onPause()
         sensorManager.unregisterListener(shakeListener)
+        
+        // Hibernation: Release heavy AI model when app is in background to prevent
+        // the process from being killed by the Low Memory Killer.
+        // The background MeshService will stay alive to receive SOS.
+        if (isFinishing || !isChangingConfigurations) {
+            android.util.Log.i("SECONDLIFE", "App backgrounded — hibernating AI model to protect scanner process")
+            viewModel.hibernate()
+        }
     }
 
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
-            android.util.Log.w("SECONDLIFE", "Memory pressure level=$level — trimming non-essential resources")
-            // Release camera when under memory pressure (it re-initializes on next use)
+            android.util.Log.w("SECONDLIFE", "Memory pressure level=$level — aggressive hibernation")
+            viewModel.hibernate()
             if (::cameraManager.isInitialized) cameraManager.release()
         }
     }

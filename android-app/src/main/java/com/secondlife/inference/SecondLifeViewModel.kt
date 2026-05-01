@@ -249,6 +249,15 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
 
     fun verifyAuditChain(): Boolean = session.verifyAuditChain()
 
+    /** 
+     * Releases heavy resources (AI model) while keeping the app process alive.
+     * This is called when the app is backgrounded so the background scanner
+     * doesn't get killed by Android to reclaim RAM.
+     */
+    fun hibernate() {
+        session.release()
+    }
+
     override fun onCleared() {
         super.onCleared()
         timerManager.release()

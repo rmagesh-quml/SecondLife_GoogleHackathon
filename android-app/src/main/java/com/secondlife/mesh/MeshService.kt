@@ -47,6 +47,11 @@ class MeshService : Service() {
 
     override fun onBind(intent: Intent?): IBinder = binder
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.d(TAG, "MeshService onStartCommand")
+        return START_STICKY
+    }
+
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "MeshService created")
