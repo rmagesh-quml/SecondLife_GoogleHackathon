@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -154,6 +155,7 @@ fun MainScreen(
     val isBroadcasting by viewModel.isBroadcasting.collectAsStateWithLifecycle()
     val responderCount by viewModel.responderCount.collectAsStateWithLifecycle()
     val responderTasks by viewModel.responderTasks.collectAsStateWithLifecycle()
+    val activeBackend  by viewModel.activeBackend.collectAsStateWithLifecycle()
     var selectedMode      by remember { mutableStateOf(ResponseMode.DETAIL) }
     var showCameraOverlay by remember { mutableStateOf(false) }
 
@@ -202,6 +204,7 @@ fun MainScreen(
         isBroadcasting    = isBroadcasting,
         responderCount    = responderCount,
         responderTasks    = responderTasks,
+        activeBackend     = activeBackend,
     )
 
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -258,30 +261,50 @@ fun MainScreen(
         )
     }
 
-    ModalNavigationDrawer(
-        drawerState   = drawerState,
-        drawerContent = { EmergencySessionsDrawer(state, callbacks) },
-    ) {
-        MainScreenContent(state = state, callbacks = callbacks)
-    }
+    Box(Modifier.fillMaxSize()) {
+        ModalNavigationDrawer(
+            drawerState   = drawerState,
+            drawerContent = { EmergencySessionsDrawer(state, callbacks) },
+        ) {
+            MainScreenContent(state = state, callbacks = callbacks)
+        }
 
-    // ── Full-screen camera overlay ────────────────────────────────────────────
-    // Shown when the user taps the camera button; works like Claude/ChatGPT's
-    // in-app photo capture — live viewfinder, one-tap shutter, gallery picker.
-    if (showCameraOverlay) {
-        CameraCapture(
-            cameraManager   = cameraManager,
-            onImageCaptured = { bitmap ->
-                viewModel.setCapturedImage(bitmap)
-                showCameraOverlay = false
-                // Auto-submit a scene-analysis query so the AI responds immediately
-                viewModel.query(
-                    "Analyze this scene: describe what injury or emergency you see " +
-                    "and tell me the most important immediate steps to take."
-                )
-            },
-            onDismiss = { showCameraOverlay = false },
-        )
+        // ── Full-screen camera overlay ────────────────────────────────────────
+        if (showCameraOverlay) {
+            CameraCapture(
+                cameraManager   = cameraManager,
+                onImageCaptured = { bitmap ->
+                    viewModel.setCapturedImage(bitmap)
+                    showCameraOverlay = false
+                    viewModel.query(
+                        "Analyze this scene: describe what injury or emergency you see " +
+                        "and tell me the most important immediate steps to take."
+                    )
+                },
+                onDismiss = { showCameraOverlay = false },
+            )
+        }
+
+        // ── Emergency FAB — hidden while camera is open ───────────────────────
+        if (!showCameraOverlay) {
+            EmergencyFab(
+                isListening    = isListening,
+                isBroadcasting = isBroadcasting,
+                responderCount = responderCount,
+                onTap          = { speechManager.toggle() },
+                onLongPress    = {
+                    scope.launch {
+                        runCatching { cameraManager.captureFrame() }
+                            .onSuccess { viewModel.setCapturedImage(it) }
+                        speechManager.toggle()
+                    }
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 32.dp),
+            )
+        }
     }
 }
 
@@ -578,15 +601,13 @@ fun MainScreenContent(
 
             // Floating action bar pinned to the bottom of the screen.
             BottomActionBar(
-                isListening   = state.isListening,
                 capturedImage = state.capturedImage,
                 onCancelTap   = callbacks.onCancelTap,
-                onMicTap      = callbacks.onMicTap,
                 onCameraTap   = callbacks.onCameraTap,
                 onClearImage  = callbacks.onClearImage,
                 modifier      = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 16.dp),
+                    .padding(bottom = 24.dp),
             )
         }
     }
@@ -1165,10 +1186,8 @@ private fun ModeToggleRow(
 // ── Bottom action bar ───────────────────────────────────────────────────────
 @Composable
 private fun BottomActionBar(
-    isListening:   Boolean,
     capturedImage: Bitmap?,
     onCancelTap:   () -> Unit,
-    onMicTap:      () -> Unit,
     onCameraTap:   () -> Unit,
     onClearImage:  () -> Unit,
     modifier:      Modifier = Modifier,
@@ -1187,28 +1206,23 @@ private fun BottomActionBar(
             horizontalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             CircleActionButton(
-                icon            = Icons.Default.Close,
-                contentDesc     = "Cancel",
-                size            = 56.dp,
-                background      = ext.accentRed.copy(alpha = 0.15f),
-                iconColor       = ext.accentRed,
-                onClick         = onCancelTap,
+                icon        = Icons.Default.Close,
+                contentDesc = "Cancel",
+                size        = 56.dp,
+                background  = ext.accentRed.copy(alpha = 0.15f),
+                iconColor   = ext.accentRed,
+                onClick     = onCancelTap,
             )
+            // Centre gap — matches the EmergencyFab width so Cancel and Camera
+            // stay flanking the red FAB without overlapping it.
+            Spacer(Modifier.size(76.dp))
             CircleActionButton(
-                icon            = if (isListening) Icons.Default.Stop else Icons.Default.Mic,
-                contentDesc     = if (isListening) "Stop" else "Speak",
-                size            = 76.dp,
-                background      = ext.accentGreen,
-                iconColor       = Color(0xFF06241A),
-                onClick         = onMicTap,
-            )
-            CircleActionButton(
-                icon            = Icons.Default.CameraAlt,
-                contentDesc     = "Capture scene",
-                size            = 56.dp,
-                background      = ext.accentBlue.copy(alpha = 0.15f),
-                iconColor       = ext.accentBlue,
-                onClick         = onCameraTap,
+                icon        = Icons.Default.CameraAlt,
+                contentDesc = "Capture scene",
+                size        = 56.dp,
+                background  = ext.accentBlue.copy(alpha = 0.15f),
+                iconColor   = ext.accentBlue,
+                onClick     = onCameraTap,
             )
         }
     }

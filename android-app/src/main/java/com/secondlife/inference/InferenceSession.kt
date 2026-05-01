@@ -40,6 +40,10 @@ class InferenceSession(
     private val _modelReady = MutableStateFlow(false)
     val modelReady: StateFlow<Boolean> = _modelReady
 
+    // Which backend is actually running — "GpuArtisan", "GPU(OpenCL)", "CPU(8T)", or "uninitialized"
+    private val _activeBackend = MutableStateFlow("uninitialized")
+    val activeBackend: StateFlow<String> = _activeBackend
+
     private var engine: Engine? = null
 
     // Persistent conversation — kept alive across queries so follow-ups retain context.
@@ -123,30 +127,73 @@ class InferenceSession(
             val sizeMb = modelFile.length() / 1_048_576
             android.util.Log.i("InferenceSession", "Loading model from $modelPath ($sizeMb MB)…")
 
-            // ── CPU backend with explicit 8-thread config ─────────────────────
-            // GPU/NPU backends (GpuArtisan, GPU) require copying the entire 3.4 GB
-            // model into GPU-addressable physical memory, which triggers OOM on the
-            // S25 Ultra when the system is already under swap pressure.
-            // CPU uses memory-mapped I/O (virtual addressing, not physical RAM
-            // allocation), so it loads reliably regardless of available RAM.
-            // 8 threads on the Snapdragon 8 Elite X Cortex-X925 cores gives
-            // ~2-3× the throughput of the default single-threaded config.
-            // maxNumImages=1 enables real multimodal image+text input.
-            // cacheDir caches compiled kernels for faster subsequent starts.
-            val config = EngineConfig(
-                modelPath     = modelPath,
-                backend       = Backend.CPU(numOfThreads = 8),
-                visionBackend = Backend.CPU(numOfThreads = 4),
-                // 4096 is the minimum floor for Gemma-2-2b-IT to avoid DYNAMIC_UPDATE_SLICE crash
-                maxNumTokens  = 4096,
-                maxNumImages  = 1,
-                cacheDir      = context.cacheDir.absolutePath,
+            // ── GPU → CPU fallback ladder ─────────────────────────────────────
+            // E4B INT4 model is ~2.5 GB — fits in GPU-addressable memory on the
+            // S25 Ultra (Snapdragon 8 Elite, 12 GB LPDDR5X).
+            //
+            // Try order:
+            //   1. GpuArtisan — Samsung Artisan AI, tuned for Snapdragon 8 Elite
+            //   2. GPU        — standard OpenCL path
+            //   3. CPU(8T)    — guaranteed fallback, memory-mapped, never OOMs
+            //
+            // GPU configs use maxNumTokens=2048 to keep KV-cache VRAM overhead low.
+            // CPU uses 4096 to avoid the Gemma DYNAMIC_UPDATE_SLICE crash floor.
+            //
+            // NOTE: if a GPU backend causes a native OOM (SIGKILL) rather than a
+            // catchable exception, the OS will kill the process and Android will
+            // restart the app, which will then retry from GpuArtisan again. To
+            // break the loop, add a SharedPreferences flag that marks GPU as failed.
+            data class Candidate(
+                val backend: Backend,
+                val visionBackend: Backend,
+                val maxTokens: Int,
+                val label: String,
             )
-            android.util.Log.i("InferenceSession", "Initialising CPU(8T) backend…")
-            val e = Engine(config)
-            e.initialize()
-            engine = e
-            android.util.Log.i("InferenceSession", "✅ CPU(8T) backend initialised — model ready!")
+            val prefs = context.getSharedPreferences("inference_prefs", android.content.Context.MODE_PRIVATE)
+            val gpuFailed = prefs.getBoolean("gpu_init_failed", false)
+
+            val candidates = if (gpuFailed) {
+                android.util.Log.w("InferenceSession", "GPU previously failed — starting directly on CPU(8T)")
+                listOf(Candidate(Backend.CPU(numOfThreads = 8), Backend.CPU(numOfThreads = 4), 4096, "CPU(8T)"))
+            } else {
+                listOf(
+                    Candidate(Backend.GpuArtisan(), Backend.GpuArtisan(), 2048, "GpuArtisan"),
+                    Candidate(Backend.GPU(),        Backend.GPU(),        2048, "GPU(OpenCL)"),
+                    Candidate(Backend.CPU(numOfThreads = 8), Backend.CPU(numOfThreads = 4), 4096, "CPU(8T)"),
+                )
+            }
+
+            // Mark GPU as in-progress before we try it. If the process is killed
+            // by SIGKILL (OOM), this flag persists and the next launch skips GPU.
+            if (!gpuFailed) prefs.edit().putBoolean("gpu_init_failed", true).apply()
+
+            var initialized = false
+            for (candidate in candidates) {
+                try {
+                    android.util.Log.i("InferenceSession", "Trying ${candidate.label} backend…")
+                    val config = EngineConfig(
+                        modelPath     = modelPath,
+                        backend       = candidate.backend,
+                        visionBackend = candidate.visionBackend,
+                        maxNumTokens  = candidate.maxTokens,
+                        maxNumImages  = 1,
+                        cacheDir      = context.cacheDir.absolutePath,
+                    )
+                    val e = Engine(config)
+                    e.initialize()
+                    engine = e
+                    _activeBackend.value = candidate.label
+                    // GPU succeeded — clear the failure flag so next launch tries GPU again
+                    prefs.edit().putBoolean("gpu_init_failed", false).apply()
+                    android.util.Log.i("InferenceSession", "✅ ${candidate.label} initialised — model ready!")
+                    initialized = true
+                    break
+                } catch (ex: Exception) {
+                    android.util.Log.w("InferenceSession",
+                        "${candidate.label} failed: ${ex.message} — trying next…")
+                }
+            }
+            if (!initialized) throw RuntimeException("All backends failed")
             _modelReady.value = true
         } catch (e: Exception) {
             android.util.Log.e("InferenceSession", "Model init failed: ${e.message}", e)
@@ -244,7 +291,7 @@ class InferenceSession(
                 }
 
                 isFirstTurn = false
-                val raw = message.contents.contents
+                val raw = (message.contents?.contents ?: emptyList())
                     .filterIsInstance<Content.Text>()
                     .joinToString("") { it.text }
                     .trim()
@@ -329,7 +376,7 @@ class InferenceSession(
 
             val conv = activeConversation ?: return@withContext safeDefaults
             val message = conv.sendMessage(prompt, emptyMap())
-            val raw = message.contents.contents
+            val raw = (message.contents?.contents ?: emptyList())
                 .filterIsInstance<com.google.ai.edge.litertlm.Content.Text>()
                 .joinToString("") { it.text }
                 .trim()

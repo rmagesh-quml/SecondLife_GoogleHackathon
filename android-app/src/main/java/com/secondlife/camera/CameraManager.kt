@@ -2,6 +2,7 @@ package com.secondlife.camera
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -58,8 +59,14 @@ class CameraManager(
             capture.takePicture(executor, object : ImageCapture.OnImageCapturedCallback() {
                 override fun onCaptureSuccess(image: ImageProxy) {
                     val bmp = image.toBitmap()
+                    val rotation = image.imageInfo.rotationDegrees
                     image.close()
-                    cont.resume(bmp)
+                    val upright = if (rotation != 0) {
+                        val m = Matrix().apply { postRotate(rotation.toFloat()) }
+                        Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+                            .also { if (it !== bmp) bmp.recycle() }
+                    } else bmp
+                    cont.resume(upright)
                 }
                 override fun onError(e: ImageCaptureException) {
                     cont.resumeWithException(e)

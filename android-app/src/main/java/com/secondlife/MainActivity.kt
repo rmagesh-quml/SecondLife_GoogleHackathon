@@ -20,7 +20,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,7 +37,6 @@ import com.secondlife.inference.SecondLifeViewModel
 import com.secondlife.notification.EmergencyNotificationManager
 import com.secondlife.tts.TTSManager
 import com.secondlife.ui.EmergencyAlertScreen
-import com.secondlife.ui.EmergencyFab
 import com.secondlife.ui.MainScreen
 import com.secondlife.ui.OnboardingScreen
 import com.secondlife.ui.ResponderCompassScreen
@@ -211,10 +209,7 @@ class MainActivity : ComponentActivity() {
                         showOnboarding = false
                     }
                 } else {
-                    // ── Collect state needed for FAB and overlays ────────────
-                    val isListening    by speechManager.isListening.collectAsStateWithLifecycle()
-                    val isBroadcasting by viewModel.isBroadcasting.collectAsStateWithLifecycle()
-                    val responderCount by viewModel.responderCount.collectAsStateWithLifecycle()
+                    // ── Collect state needed for overlays ────────────────────
                     val nearbyEmergency by viewModel.nearbyEmergency.collectAsStateWithLifecycle()
                     val isResponder    by viewModel.isResponder.collectAsStateWithLifecycle()
                     val assignedTask   by viewModel.assignedTask.collectAsStateWithLifecycle()
@@ -225,10 +220,8 @@ class MainActivity : ComponentActivity() {
                     val rssiLabel      by viewModel.navigator.rssiDistance.collectAsStateWithLifecycle()
                     val isGpsAvailable by viewModel.navigator.isGpsAvailable.collectAsStateWithLifecycle()
 
-                    val scope = androidx.compose.runtime.rememberCoroutineScope()
-
                     Box(modifier = Modifier.fillMaxSize()) {
-                        // ── Main app UI ──────────────────────────────────────
+                        // ── Main app UI (includes EmergencyFab) ──────────────
                         MainScreen(
                             viewModel     = viewModel,
                             ttsManager    = ttsManager,
@@ -290,24 +283,6 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
-                        // ── Global Emergency FAB — always on top ─────────────
-                        EmergencyFab(
-                            isListening    = isListening,
-                            isBroadcasting = isBroadcasting,
-                            responderCount = responderCount,
-                            onTap          = { speechManager.toggle() },
-                            onLongPress    = {
-                                scope.launch {
-                                    runCatching { cameraManager.captureFrame() }
-                                        .onSuccess { viewModel.setCapturedImage(it) }
-                                    speechManager.toggle()
-                                }
-                            },
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(bottom = 32.dp)
-                                .navigationBarsPadding(),
-                        )
                     }
                 }
             }

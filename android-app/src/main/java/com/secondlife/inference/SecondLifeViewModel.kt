@@ -26,6 +26,7 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
     val isLoading:     StateFlow<Boolean> = session.isLoading
     val modelReady:    StateFlow<Boolean> = session.modelReady
     val streamingText: StateFlow<String>  = session.streamingText
+    val activeBackend: StateFlow<String>  = session.activeBackend
 
     private val _capturedImage = MutableStateFlow<Bitmap?>(null)
     val capturedImage: StateFlow<Bitmap?> = _capturedImage.asStateFlow()

@@ -30,6 +30,7 @@ data class MainUiState(
     val isBroadcasting: Boolean = false,
     val responderCount: Int = 0,
     val responderTasks: Map<String, String> = emptyMap(),
+    val activeBackend: String = "uninitialized",
 ) {
     val latestResponse: SecondLifeResponse?
         get() = transcript.lastOrNull { it.response != null }?.response
