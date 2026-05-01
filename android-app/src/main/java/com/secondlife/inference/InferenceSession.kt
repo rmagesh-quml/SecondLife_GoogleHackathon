@@ -227,9 +227,12 @@ class InferenceSession(
 
             // 2. Fast path: known protocol + first turn → return card instantly, skip Gemma.
             //    Gemma only runs for unknown emergencies or follow-up questions.
-            if (card != null && isFirstTurn && image == null) {
+            // NOTE: do NOT use return@withContext here — it would cross the withLock boundary
+            // and skip withLock's finally { unlock() }, permanently deadlocking the mutex.
+            val fastPathHandled = card != null && isFirstTurn && image == null
+            if (fastPathHandled) {
                 isFirstTurn = false
-                val steps = card.immediateSteps
+                val steps = card!!.immediateSteps
                 val response = steps.mapIndexed { i, s -> "${i + 1}. $s" }.joinToString("\n")
                 auditLog.log(text, response, currentRole)
                 _response.value = SecondLifeResponse(
@@ -241,8 +244,8 @@ class InferenceSession(
                     steps      = steps,
                     protocolId = protocolId.name,
                 )
-                return@withContext
             }
+            if (!fastPathHandled) {
 
             // 3. Retrieve context — use cache for known protocols, BM25 for unknown
             val chunks = if (protocolId != EmergencyRouter.ProtocolId.UNKNOWN) {
@@ -334,6 +337,7 @@ class InferenceSession(
                 followUpQuestion = finalResponse.ask,
                 protocolId       = protocolId.name,
             )
+            } // end if (!fastPathHandled)
         } catch (e: Exception) {
             _response.value = SecondLifeResponse(
                 response  = "Error: ${e.message}",

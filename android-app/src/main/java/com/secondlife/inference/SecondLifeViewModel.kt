@@ -209,12 +209,18 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
 
     fun dismissHandoffReport() { _handoffReport.value = null }
 
+    // Tracks the active inference job so a new query can cancel the previous one.
+    private var activeQueryJob: kotlinx.coroutines.Job? = null
+
     fun query(text: String, audio: Any? = null) {
         if (text.isBlank()) return
         if (!session.modelReady.value) {
             postError("Model is still loading — please wait a moment")
             return
         }
+        // Cancel any in-flight inference — the user has moved on to a new prompt.
+        activeQueryJob?.cancel()
+
         _handoffReport.value = null
         val capturedId  = _activeSessionId.value
         val pendingTurn = TranscriptTurn(userText = text, response = null)
@@ -230,7 +236,7 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         }
 
         val image = _capturedImage.value
-        viewModelScope.launch {
+        activeQueryJob = viewModelScope.launch {
             session.respond(text, audio = audio, image = image)
             val completed = session.response.value ?: return@launch
 
