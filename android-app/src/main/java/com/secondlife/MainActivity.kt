@@ -218,6 +218,7 @@ class MainActivity : ComponentActivity() {
                     val nearbyEmergency by viewModel.nearbyEmergency.collectAsStateWithLifecycle()
                     val isResponder    by viewModel.isResponder.collectAsStateWithLifecycle()
                     val assignedTask   by viewModel.assignedTask.collectAsStateWithLifecycle()
+                    val isCameraActive by viewModel.isCameraActive.collectAsStateWithLifecycle()
 
                     // Compass state from CompassNavigator
                     val arrowRotation  by viewModel.navigator.arrowRotation.collectAsStateWithLifecycle()
@@ -304,8 +305,11 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(bottom = 32.dp)
+                                .align(if (isCameraActive) Alignment.BottomEnd else Alignment.BottomCenter)
+                                .padding(
+                                    bottom = if (isCameraActive) 60.dp else 32.dp,
+                                    end    = if (isCameraActive) 24.dp else 0.dp
+                                )
                                 .navigationBarsPadding(),
                         )
                     }

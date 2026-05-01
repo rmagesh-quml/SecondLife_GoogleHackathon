@@ -36,6 +36,9 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
     private val _handoffReport = MutableStateFlow<String?>(null)
     val handoffReport: StateFlow<String?> = _handoffReport.asStateFlow()
 
+    private val _isCameraActive = MutableStateFlow(false)
+    val isCameraActive: StateFlow<Boolean> = _isCameraActive.asStateFlow()
+
     val timerManager = EmergencyTimerManager(viewModelScope)
     val timerState:    StateFlow<TimerState?> = timerManager.timerState
     val metronomeBeat: StateFlow<Boolean>     = timerManager.metronomeBeat
@@ -123,6 +126,7 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
     // ── Camera ──────────────────────────────────────────────────────────────
     fun setCapturedImage(bitmap: Bitmap?) { _capturedImage.value = bitmap }
     fun clearCapturedImage()              { _capturedImage.value = null }
+    fun setCameraActive(active: Boolean)  { _isCameraActive.value = active }
 
     // ── Error snackbar ──────────────────────────────────────────────────────
     fun dismissError()         { _error.value = null }

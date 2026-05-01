@@ -155,7 +155,7 @@ fun MainScreen(
     val responderCount by viewModel.responderCount.collectAsStateWithLifecycle()
     val responderTasks by viewModel.responderTasks.collectAsStateWithLifecycle()
     var selectedMode      by remember { mutableStateOf(ResponseMode.DETAIL) }
-    var showCameraOverlay by remember { mutableStateOf(false) }
+    val showCameraOverlay by viewModel.isCameraActive.collectAsStateWithLifecycle()
 
     // Tick once per second to update the session timer without recomposing
     // the entire tree on every frame.
@@ -209,7 +209,7 @@ fun MainScreen(
 
     val callbacks = MainUiCallbacks(
         onMicTap     = { speechManager.toggle() },
-        onCameraTap  = { showCameraOverlay = true },
+        onCameraTap  = { viewModel.setCameraActive(true) },
         onCancelTap     = {
             ttsManager.stop()
             speechManager.stop()
@@ -273,14 +273,14 @@ fun MainScreen(
             cameraManager   = cameraManager,
             onImageCaptured = { bitmap ->
                 viewModel.setCapturedImage(bitmap)
-                showCameraOverlay = false
+                viewModel.setCameraActive(false)
                 // Auto-submit a scene-analysis query so the AI responds immediately
                 viewModel.query(
                     "Analyze this scene: describe what injury or emergency you see " +
                     "and tell me the most important immediate steps to take."
                 )
             },
-            onDismiss = { showCameraOverlay = false },
+            onDismiss = { viewModel.setCameraActive(false) },
         )
     }
 }
