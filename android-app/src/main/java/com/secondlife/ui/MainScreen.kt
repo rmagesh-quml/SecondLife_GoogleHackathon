@@ -887,6 +887,13 @@ private fun TimerRow(
                     color = ext.accentRed,
                     fontWeight = FontWeight.SemiBold,
                 )
+                timerState.hint?.let {
+                    Text(
+                        text  = it,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ext.textMuted,
+                    )
+                }
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

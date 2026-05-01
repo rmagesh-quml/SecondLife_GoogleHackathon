@@ -11,6 +11,7 @@ data class TimerState(
     val label: String,
     val elapsedMs: Long,
     val running: Boolean,
+    val hint: String? = null,
 )
 
 class EmergencyTimerManager(private val scope: CoroutineScope) {
@@ -24,15 +25,15 @@ class EmergencyTimerManager(private val scope: CoroutineScope) {
     private var timerJob: Job? = null
     private var metronomeJob: Job? = null
 
-    fun startTimer(label: String) {
+    fun startTimer(label: String, hint: String? = null) {
         timerJob?.cancel()
         val startMs = System.currentTimeMillis()
-        _timerState.value = TimerState(label, 0L, running = true)
+        _timerState.value = TimerState(label, 0L, running = true, hint = hint)
         timerJob = scope.launch {
             while (true) {
                 delay(1_000L)
                 val elapsed = System.currentTimeMillis() - startMs
-                _timerState.value = TimerState(label, elapsed, running = true)
+                _timerState.value = TimerState(label, elapsed, running = true, hint = hint)
             }
         }
     }

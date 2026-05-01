@@ -7,6 +7,7 @@ data class ProtocolCard(
     val title: String,
     val immediateSteps: List<String>,
     val timerLabel: String? = null,
+    val timerHint: String? = null,
     val callEmergency: Boolean = true,
 )
 
@@ -24,6 +25,7 @@ object ProtocolCardCache {
                 "Start timing the seizure now",
             ),
             timerLabel = "Seizure timer",
+            timerHint  = "Call EMS if seizure exceeds 5 min",
         ),
         ProtocolId.CHOKING_ADULT to ProtocolCard(
             protocolId = ProtocolId.CHOKING_ADULT,
@@ -58,6 +60,7 @@ object ProtocolCardCache {
                 "If on a limb and bleeding won't stop: apply tourniquet above wound",
             ),
             timerLabel = "Pressure timer",
+            timerHint  = "Maintain firm pressure — do not release",
         ),
         ProtocolId.CPR to ProtocolCard(
             protocolId = ProtocolId.CPR,
@@ -70,6 +73,7 @@ object ProtocolCardCache {
                 "Continue 30:2 — use AED as soon as one is available",
             ),
             timerLabel = "CPR metronome",
+            timerHint  = "100–120 compressions/min · 30:2 ratio",
         ),
         ProtocolId.BURN to ProtocolCard(
             protocolId = ProtocolId.BURN,
@@ -82,6 +86,7 @@ object ProtocolCardCache {
                 "Do NOT burst any blisters",
             ),
             timerLabel = "Cooling timer (20 min)",
+            timerHint  = "Cool running water only — stop after 20 min",
         ),
         ProtocolId.FRACTURE to ProtocolCard(
             protocolId = ProtocolId.FRACTURE,

@@ -228,7 +228,7 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
             val card = protocolId?.let { ProtocolCardCache.get(it) }
             card?.timerLabel?.let { label ->
                 if (protocolId == EmergencyRouter.ProtocolId.CPR) timerManager.startMetronome()
-                else timerManager.startTimer(label)
+                else timerManager.startTimer(label, hint = card.timerHint)
             }
         }
     }
