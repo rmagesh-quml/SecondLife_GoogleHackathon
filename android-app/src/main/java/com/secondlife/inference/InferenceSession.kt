@@ -6,7 +6,6 @@ import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Conversation
-import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.secondlife.emergency.EmergencyRouter
@@ -213,20 +212,35 @@ class InferenceSession(
 
             // 5. Run Gemma — reuse persistent conversation for follow-up turns
             val result = if (engine != null) {
+                // Plain createConversation() — no ConversationConfig.
+                // Gemma-IT uses <start_of_turn>user / model tokens; there is no
+                // "system" role in its compiled template. Passing a ConversationConfig
+                // with systemInstruction causes the native executor to fail with
+                // "Failed to invoke the compiled model" on every sendMessage call.
                 if (activeConversation == null) {
-                    // Wire a role-specific system instruction at conversation creation.
-                    // This keeps per-message prompts shorter → faster first-token latency.
-                    val sysPrompt = Contents.of(Content.Text(buildSystemInstruction(currentRole)))
-                    val convCfg   = ConversationConfig(systemInstruction = sysPrompt)
-                    activeConversation = engine!!.createConversation(convCfg)
+                    activeConversation = engine!!.createConversation()
                 }
                 val conversation = activeConversation!!
 
-                // Send as multimodal Contents when an image is attached; text-only otherwise.
+                // When image is attached, send multimodal Contents so the vision
+                // encoder actually sees the pixel data. Falls back gracefully to
+                // text-only if the model was compiled without vision support.
                 val message = if (image != null) {
-                    val jpegBytes = bitmapToJpegBytes(image)
-                    val contents  = Contents.of(Content.ImageBytes(jpegBytes), Content.Text(prompt))
-                    conversation.sendMessage(contents, emptyMap())
+                    try {
+                        val jpegBytes = bitmapToJpegBytes(image)
+                        val contents  = Contents.of(
+                            Content.ImageBytes(jpegBytes),
+                            Content.Text(prompt),
+                        )
+                        conversation.sendMessage(contents, emptyMap())
+                    } catch (e: Exception) {
+                        android.util.Log.w(
+                            "InferenceSession",
+                            "Vision sendMessage failed — falling back to text-only: ${e.message}",
+                        )
+                        // Model may not be compiled with vision support; text path still works
+                        conversation.sendMessage(prompt, emptyMap())
+                    }
                 } else {
                     conversation.sendMessage(prompt, emptyMap())
                 }
@@ -370,7 +384,9 @@ class InferenceSession(
             else             -> "Plain English only. No jargon."
         }
         val contextLine = chunks.firstOrNull()?.text?.take(300) ?: ""
-        val imageNote   = if (hasImage) " Visual scene available." else ""
+        val imageNote   = if (hasImage)
+            " [PHOTO ATTACHED — analyse the visible injury/scene in the image and use it to give specific steps]"
+        else ""
         return """[PANIC MODE]$imageNote
 $roleInstructions
 Protocol context: $contextLine
@@ -402,7 +418,7 @@ The "speak" field must describe the actual emergency actions, not generic phrase
         }
 
         val imageNote = if (hasImage)
-            "\nScene visually assessed. Address only what is described. Give steps now.\n"
+            "\n[PHOTO ATTACHED — look at the image, identify the injury or emergency visible, and base your steps on what you can see.]\n"
         else
             "\nAddress this specific emergency only. Give numbered steps now.\n"
 
@@ -452,21 +468,6 @@ The "speak" field must describe the actual emergency actions, not generic phrase
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-
-    // ── System instruction (role-specific, set once per conversation) ────────
-
-    private fun buildSystemInstruction(role: String): String = when (role) {
-        "layperson"      ->
-            "You are an offline emergency first-aid assistant. " +
-            "Respond with numbered steps in plain English. No jargon. Be concise and direct."
-        "paramedic"      ->
-            "You are a clinical emergency decision-support tool. " +
-            "Use medical terminology. Include drug names and dosages where relevant. Numbered steps."
-        "military_medic" ->
-            "You are a TCCC decision-support tool. Apply MARCH protocol. " +
-            "Austere environment assumed. Be decisive. Numbered steps."
-        else             -> "You are an emergency medical assistant. Give clear, numbered steps."
-    }
 
     // ── Image helpers ─────────────────────────────────────────────────────────
 
