@@ -33,9 +33,10 @@ class MeshManager(
     private val TAG = "MeshManager"
     private val SERVICE_ID = "com.secondlife.emergency"
 
-    // P2P_CLUSTER: many devices can discover each other simultaneously.
-    // Works over Bluetooth LE for discovery — no internet, no WiFi network.
-    private val STRATEGY = Strategy.P2P_CLUSTER
+    // P2P_STAR: one hub (Person A advertises), many spokes (bystanders discover).
+    // More reliable than P2P_CLUSTER for our use case — hub must NOT also run
+    // discovery simultaneously, which P2P_STAR enforces cleanly.
+    private val STRATEGY = Strategy.P2P_STAR
 
     private val connectionsClient by lazy { Nearby.getConnectionsClient(context) }
 

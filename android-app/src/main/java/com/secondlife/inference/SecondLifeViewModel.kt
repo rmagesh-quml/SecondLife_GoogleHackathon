@@ -13,6 +13,7 @@ import com.secondlife.emergency.TimerState
 import com.secondlife.mesh.CompassNavigator
 import com.secondlife.mesh.MeshManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -340,22 +341,37 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         if (_isBroadcasting.value) return
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                // CRITICAL: stop scanning before advertising.
+                // P2P_STAR (and even P2P_CLUSTER) cannot reliably run discovery
+                // and advertising simultaneously on the same device.
+                // Phone 1 must be ONLY an advertiser while broadcasting.
+                meshManager.stopScanning()
+                android.util.Log.i("SecondLifeVM", "Scanning stopped — starting SOS advertising")
+
                 val loc     = getLastKnownLocation()
                 val latest  = response.value
-                val summary = latest?.response?.take(80) ?: "Emergency — need help"
-                val severity = latest?.severity ?: 3
-                val packet  = session.generateBroadcastPacket(
-                    sessionSummary  = summary,
-                    severity        = severity,
-                    sessionId       = java.util.UUID.randomUUID().toString(),
-                    broadcasterLat  = loc?.latitude  ?: 0.0,
-                    broadcasterLng  = loc?.longitude ?: 0.0,
+                val summary = (latest?.steps?.take(2)?.joinToString(". ")
+                               ?: latest?.response?.take(60)
+                               ?: "Emergency — need help")
+                // Build the packet directly — no model call needed, faster + more reliable.
+                val packet = MeshManager.EmergencyBroadcast(
+                    severity          = latest?.severity ?: 3,
+                    type              = latest?.protocolId?.lowercase()?.replace("_", " ") ?: "emergency",
+                    summary           = summary.take(50),
+                    sessionId         = java.util.UUID.randomUUID().toString(),
+                    respondersNeeded  = 2,
+                    broadcasterLat    = loc?.latitude  ?: 0.0,
+                    broadcasterLng    = loc?.longitude ?: 0.0,
+                    broadcasterAccuracy = loc?.accuracy ?: 0f,
                 )
+                android.util.Log.i("SecondLifeVM", "Broadcasting SOS packet: $packet")
                 meshManager.startBroadcasting(packet)
                 _isBroadcasting.emit(true)
             } catch (e: Exception) {
-                android.util.Log.w("SecondLifeVM", "broadcastSos failed: ${e.message}")
-                postError("Could not start SOS broadcast — check Bluetooth")
+                android.util.Log.e("SecondLifeVM", "broadcastSos FAILED: ${e.message}", e)
+                // If advertising failed, resume scanning so we don't lose both roles.
+                meshManager.startScanning()
+                postError("Could not start SOS broadcast — is Bluetooth on?")
             }
         }
     }
@@ -366,6 +382,8 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
             _isBroadcasting.emit(false)
             _responderCount.emit(0)
             _responderTasks.emit(emptyMap())
+            // Resume scanning now that we've stopped advertising.
+            withContext(Dispatchers.IO) { meshManager.startScanning() }
         }
     }
 
@@ -408,24 +426,36 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         cancelSession()
     }
 
-    // ── Demo mode — long-press to simulate full mesh flow on one device ───────
+    // ── Demo mode ──────────────────────────────────────────────────────────────
 
+    /**
+     * Phone 1 side: actually start advertising over BLE with a demo packet.
+     * Previously this only updated UI state — now it calls the real Nearby API.
+     */
     fun triggerDemoMesh() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
+            // Stop scanning first — can't advertise and discover simultaneously.
+            meshManager.stopScanning()
+            val packet = MeshManager.EmergencyBroadcast(
+                severity          = 4,
+                type              = "fracture",
+                summary           = "Broken leg, can't walk, needs help",
+                sessionId         = java.util.UUID.randomUUID().toString(),
+                respondersNeeded  = 2,
+                broadcasterLat    = 0.0,
+                broadcasterLng    = 0.0,
+                broadcasterAccuracy = 0f,
+            )
+            android.util.Log.i("SecondLifeVM", "Demo: starting REAL BLE broadcast")
+            meshManager.startBroadcasting(packet)
             _isBroadcasting.emit(true)
-            kotlinx.coroutines.delay(3000)
-            _responderCount.emit(1)
-            _responderTasks.emit(mapOf("demo_1" to "Locate an AED nearby"))
-            kotlinx.coroutines.delay(4000)
-            _responderCount.emit(2)
-            _responderTasks.emit(mapOf(
-                "demo_1" to "Locate an AED nearby",
-                "demo_2" to "Call 911 when signal returns",
-            ))
         }
     }
 
-    /** Demo: simulate receiving an incoming SOS as if you were Person B. */
+    /**
+     * Phone 2 side: inject a fake incoming alert without needing BLE.
+     * Useful to test the alert UI when Bluetooth isn't available.
+     */
     fun triggerDemoIncomingAlert() {
         viewModelScope.launch {
             _pendingEndpointId.emit("demo_endpoint")
@@ -436,7 +466,7 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
                     summary          = "Broken leg, can't walk, needs help",
                     sessionId        = "demo-session-001",
                     respondersNeeded = 2,
-                    broadcasterLat   = 0.0,   // GPS unavailable in demo
+                    broadcasterLat   = 0.0,
                     broadcasterLng   = 0.0,
                     broadcasterAccuracy = 0f,
                 )
