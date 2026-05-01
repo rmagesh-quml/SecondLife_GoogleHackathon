@@ -17,6 +17,9 @@ data/chunks/*
 
 # Python
 .venv/
+.venv-bench/
+venv/
+env/
 __pycache__/
 *.py[cod]
 .pytest_cache/
