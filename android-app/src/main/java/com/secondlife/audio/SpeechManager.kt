@@ -42,6 +42,14 @@ class SpeechManager(private val context: Context) {
 
     private var recognizer: SpeechRecognizer? = null
 
+    // Set to true when stop() is called intentionally so that the ERROR_CLIENT
+    // callback fired by stopListening() doesn't surface as a user-visible toast.
+    private var stoppingIntentionally = false
+
+    // Set to true while an auto-retry is pending (error 11 — audio session busy).
+    // Prevents cascading retries if the second attempt also fails.
+    private var autoRetrying = false
+
     fun toggle() {
         if (_isListening.value) stop() else start()
     }
@@ -78,23 +86,48 @@ class SpeechManager(private val context: Context) {
                     _isListening.value = false
                     _partialText.value = ""
                     _rmsLevel.value    = 0f
+                    // Empty result is normal (user was silent) — don't show an error toast
                     if (text.isNotBlank()) onResult?.invoke(text)
-                    else onError?.invoke("No speech detected — try again")
                 }
 
                 override fun onError(error: Int) {
                     _isListening.value = false
                     _partialText.value = ""
                     _rmsLevel.value    = 0f
-                    val msg = when (error) {
-                        SpeechRecognizer.ERROR_NO_MATCH       -> "No speech detected — try again"
-                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Listening timed out — try again"
-                        SpeechRecognizer.ERROR_NETWORK,
-                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Network error — enable offline speech in Settings"
-                        SpeechRecognizer.ERROR_AUDIO          -> "Microphone error"
-                        else                                  -> "Speech error ($error)"
+
+                    // Errors caused by our own stop() call or routine non-speech events
+                    // should never reach the user as a toast.
+                    if (stoppingIntentionally) {
+                        stoppingIntentionally = false
+                        return
                     }
-                    onError?.invoke(msg)
+                    when (error) {
+                        SpeechRecognizer.ERROR_NO_MATCH,       // user didn't speak — silent reset
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT, // timed out — silent reset
+                        SpeechRecognizer.ERROR_CLIENT,         // fired after destroy() — suppress
+                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY // already running — suppress
+                        -> return
+                        11 -> {
+                            // ERROR_SERVER_DISCONNECTED — audio session was still held by TTS
+                            // (or another audio focus owner) when the recognizer tried to start.
+                            // Retry once after 350ms to let the audio system settle.
+                            if (!autoRetrying) {
+                                autoRetrying = true
+                                mainHandler.postDelayed({
+                                    autoRetrying = false
+                                    start()
+                                }, 350)
+                            }
+                            return
+                        }
+                        SpeechRecognizer.ERROR_NETWORK,
+                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
+                            onError?.invoke("Network error — enable offline speech in Settings")
+                        SpeechRecognizer.ERROR_AUDIO ->
+                            onError?.invoke("Microphone error — check permissions")
+                        else ->
+                            onError?.invoke("Speech error ($error)")
+                    }
                 }
 
                 override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -114,9 +147,13 @@ class SpeechManager(private val context: Context) {
 
     fun stop() {
         mainHandler.post {
+            stoppingIntentionally = true
             recognizer?.stopListening()
             _isListening.value = false
             _rmsLevel.value    = 0f
+            // Clear the flag after a short window — any ERROR_CLIENT fired by
+            // stopListening() arrives within a few ms; 300ms is a safe buffer.
+            mainHandler.postDelayed({ stoppingIntentionally = false }, 300)
         }
     }
 

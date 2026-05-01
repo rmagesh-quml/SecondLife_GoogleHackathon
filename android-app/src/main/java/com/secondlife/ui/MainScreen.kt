@@ -211,8 +211,8 @@ fun MainScreen(
     val scope       = rememberCoroutineScope()
 
     val callbacks = MainUiCallbacks(
-        onMicTap     = { speechManager.toggle() },
-        onCameraTap  = { showCameraOverlay = true },
+        onMicTap     = { ttsManager.stop(); speechManager.toggle() },
+        onCameraTap  = { ttsManager.stop(); showCameraOverlay = true },
         onCancelTap     = {
             ttsManager.stop()
             speechManager.stop()
@@ -291,7 +291,7 @@ fun MainScreen(
                 isListening    = isListening,
                 isBroadcasting = isBroadcasting,
                 responderCount = responderCount,
-                onTap          = { speechManager.toggle() },
+                onTap          = { ttsManager.stop(); speechManager.toggle() },
                 onLongPress    = {
                     scope.launch {
                         runCatching { cameraManager.captureFrame() }

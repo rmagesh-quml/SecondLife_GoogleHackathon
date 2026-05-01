@@ -103,13 +103,19 @@ class MeshManager(
     private val endpointDiscoveryCallback = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
             if (info.serviceId != SERVICE_ID) return
+            // Deduplicate: the watchdog restarts discovery every 20s, which re-fires
+            // onEndpointFound for every already-known endpoint. Without this guard,
+            // users get a new alert notification every 20s for the same broadcaster.
+            if (discoveredEndpoints.containsKey(endpointId)) {
+                Log.d(TAG, "onEndpointFound: $endpointId already known — skipping duplicate alert")
+                return
+            }
             Log.d(TAG, "🚨 SecondLife SOS detected from $endpointId via Bluetooth")
             runCatching {
                 val broadcast = decodeBroadcast(info.endpointName)
                 discoveredEndpoints[endpointId] = broadcast
                 onEmergencyReceived(broadcast, endpointId)
                 // Nearby doesn't expose raw RSSI — use a reasonable mid-range default.
-                // The user will see "Nearby · ~25m" as a starting estimate.
                 onRSSIUpdate(-70)
             }.onFailure { e ->
                 Log.w(TAG, "Could not decode SOS packet from $endpointId: ${e.message}")
