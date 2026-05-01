@@ -124,56 +124,29 @@ class InferenceSession(
             val sizeMb = modelFile.length() / 1_048_576
             android.util.Log.i("InferenceSession", "Loading model from $modelPath ($sizeMb MB)…")
 
-            // ── GPU-first backend chain for Samsung Galaxy S25 Ultra ──────────
-            // Priority: GpuArtisan (Adreno 830, Snapdragon 8 Elite)
-            //         → GPU (standard OpenCL path)
-            //         → CPU with 8 threads (safe fallback)
+            // ── CPU backend with explicit 8-thread config ─────────────────────
+            // GPU/NPU backends (GpuArtisan, GPU) require copying the entire 3.4 GB
+            // model into GPU-addressable physical memory, which triggers OOM on the
+            // S25 Ultra when the system is already under swap pressure.
+            // CPU uses memory-mapped I/O (virtual addressing, not physical RAM
+            // allocation), so it loads reliably regardless of available RAM.
+            // 8 threads on the Snapdragon 8 Elite X Cortex-X925 cores gives
+            // ~2-3× the throughput of the default single-threaded config.
             // maxNumImages=1 enables real multimodal image+text input.
-            // cacheDir speeds up subsequent loads by caching compiled kernels.
-            val cacheDir = context.cacheDir.absolutePath
-            val backends = listOf(
-                "GpuArtisan" to EngineConfig(
-                    modelPath     = modelPath,
-                    backend       = Backend.GpuArtisan(),
-                    visionBackend = Backend.GPU(),
-                    maxNumTokens  = 512,
-                    maxNumImages  = 1,
-                    cacheDir      = cacheDir,
-                ),
-                "GPU" to EngineConfig(
-                    modelPath     = modelPath,
-                    backend       = Backend.GPU(),
-                    visionBackend = Backend.GPU(),
-                    maxNumTokens  = 512,
-                    maxNumImages  = 1,
-                    cacheDir      = cacheDir,
-                ),
-                "CPU(8T)" to EngineConfig(
-                    modelPath     = modelPath,
-                    backend       = Backend.CPU(numOfThreads = 8),
-                    visionBackend = Backend.CPU(numOfThreads = 4),
-                    maxNumTokens  = 512,
-                    maxNumImages  = 1,
-                    cacheDir      = cacheDir,
-                ),
+            // cacheDir caches compiled kernels for faster subsequent starts.
+            val config = EngineConfig(
+                modelPath     = modelPath,
+                backend       = Backend.CPU(numOfThreads = 8),
+                visionBackend = Backend.CPU(numOfThreads = 4),
+                maxNumTokens  = 512,
+                maxNumImages  = 1,
+                cacheDir      = context.cacheDir.absolutePath,
             )
-
-            var lastError: Exception? = null
-            for ((name, cfg) in backends) {
-                try {
-                    android.util.Log.i("InferenceSession", "Trying $name backend…")
-                    val e = Engine(cfg)
-                    e.initialize()
-                    engine = e
-                    android.util.Log.i("InferenceSession", "✅ $name backend initialised — model ready!")
-                    break
-                } catch (e: Exception) {
-                    android.util.Log.w("InferenceSession", "$name backend failed: ${e.message}")
-                    lastError = e
-                }
-            }
-
-            if (engine == null) throw (lastError ?: Exception("All backends failed"))
+            android.util.Log.i("InferenceSession", "Initialising CPU(8T) backend…")
+            val e = Engine(config)
+            e.initialize()
+            engine = e
+            android.util.Log.i("InferenceSession", "✅ CPU(8T) backend initialised — model ready!")
             _modelReady.value = true
         } catch (e: Exception) {
             android.util.Log.e("InferenceSession", "Model init failed: ${e.message}", e)
