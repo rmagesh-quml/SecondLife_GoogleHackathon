@@ -55,7 +55,9 @@ object EmergencyNotificationManager {
     }
 
     fun showAlert(context: Context, type: String, summary: String, endpointId: String) {
+        // Create an intent that carries the endpoint ID
         val intent = Intent(context, MainActivity::class.java).apply {
+            action = "com.secondlife.intent.action.ACCEPT_EMERGENCY"
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra("EXTRA_AUTO_ACCEPT_ID", endpointId)
         }
@@ -66,14 +68,16 @@ object EmergencyNotificationManager {
 
         val notif = NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentTitle("🚨 Nearby EMERGENCY: $type")
+            .setContentTitle("🚨 Nearby EMERGENCY: ${type.uppercase()}")
             .setContentText(summary)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setVibrate(longArrayOf(0, 800, 200, 800))
-            .setFullScreenIntent(pi, true)
+            // Long vibration pattern for background alerting
+            .setVibrate(longArrayOf(0, 500, 200, 500, 200, 500, 200, 500, 500, 1000))
+            .setFullScreenIntent(pi, true) // Show as heads-up or open activity immediately
             .setContentIntent(pi)
             .setAutoCancel(true)
+            .setOngoing(false)
             .build()
 
         context.getSystemService(NotificationManager::class.java).notify(NOTIF_ID_ALERT, notif)

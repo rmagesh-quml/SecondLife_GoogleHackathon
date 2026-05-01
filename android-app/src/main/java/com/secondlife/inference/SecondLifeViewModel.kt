@@ -301,9 +301,12 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
 
     // ── Person B actions ──────────────────────────────────────────────────────
 
-    fun acceptEmergency() {
+    fun acceptEmergency(providedEndpointId: String? = null) {
         val broadcast   = _nearbyEmergency.value ?: return
-        val endpointId  = _pendingEndpointId.value ?: return
+        val endpointId  = providedEndpointId ?: _pendingEndpointId.value ?: return
+        
+        android.util.Log.i("SecondLifeVM", "Accepting emergency from $endpointId. Location: ${broadcast.broadcasterLat}, ${broadcast.broadcasterLng}")
+
         navigator.startNavigation(broadcast.broadcasterLat, broadcast.broadcasterLng)
         meshManager.joinSession(endpointId, broadcast.sessionId)
         viewModelScope.launch {

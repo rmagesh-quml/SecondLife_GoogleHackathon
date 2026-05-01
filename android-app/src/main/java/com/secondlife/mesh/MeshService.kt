@@ -98,13 +98,14 @@ class MeshService : Service() {
         _pendingEndpointId.value = endpointId
         _nearbyEmergency.value = broadcast
         
-        // Buzz the phone so user feels it even if it's in their pocket
+        // Repeated buzzing for 2 seconds to make sure it's noticed
         val vibrator = getSystemService(android.os.Vibrator::class.java)
+        val pattern = longArrayOf(0, 400, 200, 400, 200, 400, 200, 400)
         if (android.os.Build.VERSION.SDK_INT >= 26) {
-            vibrator.vibrate(android.os.VibrationEffect.createOneShot(800, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+            vibrator.vibrate(android.os.VibrationEffect.createWaveform(pattern, -1))
         } else {
             @Suppress("DEPRECATION")
-            vibrator.vibrate(800)
+            vibrator.vibrate(pattern, -1)
         }
 
         // Background alert!

@@ -344,13 +344,18 @@ class MainActivity : ComponentActivity() {
         val autoAcceptId = intent.getStringExtra("EXTRA_AUTO_ACCEPT_ID")
         if (autoAcceptId != null) {
             lifecycleScope.launch {
-                // Wait for mesh service to be bound if needed
-                while (meshService == null) {
+                // Wait for mesh service to be bound and for it to have the emergency data
+                var retryCount = 0
+                while ((meshService == null || viewModel.nearbyEmergency.value == null) && retryCount < 20) {
                     kotlinx.coroutines.delay(100)
+                    retryCount++
                 }
+                
+                android.util.Log.d("MainActivity", "Handling background alert for $autoAcceptId. Ready: ${viewModel.nearbyEmergency.value != null}")
+                
                 // Dismiss the background alert notification now that we are in-app
                 EmergencyNotificationManager.dismissAlert(this@MainActivity)
-                viewModel.acceptEmergency()
+                viewModel.acceptEmergency(autoAcceptId)
             }
         }
     }
