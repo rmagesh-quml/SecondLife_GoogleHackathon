@@ -59,4 +59,7 @@ data class MainUiCallbacks(
     val onResetTimer: () -> Unit = {},
     val onGenerateReport: () -> Unit = {},
     val onDismissReport: () -> Unit = {},
+    // Mesh: Person A broadcasts SOS; stop broadcasting
+    val onBroadcastSos: () -> Unit = {},
+    val onStopBroadcast: () -> Unit = {},
 )

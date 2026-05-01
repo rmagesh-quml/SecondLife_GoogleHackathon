@@ -8,13 +8,17 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.secondlife.audio.SpeechManager
 import com.secondlife.camera.CameraManager
 import com.secondlife.inference.SecondLifeViewModel
 import com.secondlife.tts.TTSManager
+import com.secondlife.ui.EmergencyAlertScreen
 import com.secondlife.ui.MainScreen
+import com.secondlife.ui.ResponderCompassScreen
 import com.secondlife.ui.theme.SecondLifeTheme
 import kotlinx.coroutines.launch
 
@@ -52,22 +56,16 @@ class MainActivity : ComponentActivity() {
 
         ttsManager    = TTSManager(this)
         speechManager = SpeechManager(this)
-        cameraManager = CameraManager(this, this)   // 'this' as LifecycleOwner
+        cameraManager = CameraManager(this, this)
 
         // Wire speech → query pipeline
-        speechManager.onResult = { transcript ->
-            viewModel.query(text = transcript)
-        }
-        speechManager.onError = { msg ->
-            viewModel.postError(msg)
-        }
+        speechManager.onResult = { transcript -> viewModel.query(text = transcript) }
+        speechManager.onError  = { msg -> viewModel.postError(msg) }
 
         // Initialise camera in background
-        lifecycleScope.launch {
-            runCatching { cameraManager.initialize() }
-        }
+        lifecycleScope.launch { runCatching { cameraManager.initialize() } }
 
-        // Request permissions upfront
+        // Request all permissions upfront
         val meshPermissions = listOf(
             android.Manifest.permission.BLUETOOTH,
             android.Manifest.permission.BLUETOOTH_ADMIN,
@@ -82,14 +80,54 @@ class MainActivity : ComponentActivity() {
         if (needed.isNotEmpty()) permLauncher.launch(needed.toTypedArray())
 
         enableEdgeToEdge()
+
         setContent {
             SecondLifeTheme {
+                // ── Collect mesh/compass state ───────────────────────────────
+                val nearbyEmergency by viewModel.nearbyEmergency.collectAsStateWithLifecycle()
+                val isResponder     by viewModel.isResponder.collectAsStateWithLifecycle()
+                val assignedTask    by viewModel.assignedTask.collectAsStateWithLifecycle()
+                val pendingEndpoint by viewModel.pendingEndpointId.collectAsStateWithLifecycle()
+
+                // Compass state from CompassNavigator
+                val arrowRotation   by viewModel.navigator.arrowRotation.collectAsStateWithLifecycle()
+                val distanceMeters  by viewModel.navigator.distanceMeters.collectAsStateWithLifecycle()
+                val rssiLabel       by viewModel.navigator.rssiDistance.collectAsStateWithLifecycle()
+                val isGpsAvailable  by viewModel.navigator.isGpsAvailable.collectAsStateWithLifecycle()
+
+                // ── Main app UI — always rendered underneath ─────────────────
                 MainScreen(
                     viewModel     = viewModel,
                     ttsManager    = ttsManager,
                     speechManager = speechManager,
                     cameraManager = cameraManager,
                 )
+
+                // ── Person B: Incoming SOS alert overlay ─────────────────────
+                // Shown on top of MainScreen when a nearby emergency is detected.
+                // Person A's SOS beacon was picked up by Nearby Connections.
+                nearbyEmergency?.let { broadcast ->
+                    EmergencyAlertScreen(
+                        broadcast  = broadcast,
+                        rssiLabel  = rssiLabel,
+                        onAccept   = { viewModel.acceptEmergency() },
+                        onDismiss  = { viewModel.dismissEmergency() },
+                    )
+                }
+
+                // ── Person B: Compass navigation screen ──────────────────────
+                // Replaces the alert screen once Person B accepts the SOS.
+                // The arrow points toward Person A's last known GPS position.
+                if (isResponder) {
+                    ResponderCompassScreen(
+                        arrowRotation  = arrowRotation,
+                        distanceMeters = distanceMeters,
+                        rssiLabel      = rssiLabel,
+                        isGpsAvailable = isGpsAvailable,
+                        assignedTask   = assignedTask,
+                        onArrived      = { viewModel.arrivedAtScene() },
+                    )
+                }
             }
         }
     }

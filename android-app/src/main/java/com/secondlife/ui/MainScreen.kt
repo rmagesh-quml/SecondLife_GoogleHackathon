@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DrawerValue
@@ -75,6 +76,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
@@ -233,6 +235,8 @@ fun MainScreen(
         onResetTimer       = { viewModel.resetTimer(); viewModel.stopMetronome() },
         onGenerateReport   = viewModel::generateHandoffReport,
         onDismissReport    = viewModel::dismissHandoffReport,
+        onBroadcastSos     = viewModel::broadcastSos,
+        onStopBroadcast    = viewModel::stopBroadcast,
     )
 
     // Handoff report dialog
@@ -264,6 +268,93 @@ fun MainScreen(
 }
 
 // ── Mesh UI composables ─────────────────────────────────────────────────────
+
+/**
+ * SOS broadcast button shown to Person A (the injured person) after they
+ * get first-aid guidance. One tap broadcasts their emergency to nearby devices.
+ */
+@Composable
+fun SosBroadcastButton(
+    isBroadcasting: Boolean,
+    responderCount: Int,
+    onBroadcast: () -> Unit,
+    onStop: () -> Unit,
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "sosPulse")
+    val scale by infiniteTransition.animateFloat(
+        initialValue  = 1f,
+        targetValue   = 1.04f,
+        animationSpec = infiniteRepeatable(tween(600), RepeatMode.Reverse),
+        label         = "sosScale",
+    )
+
+    Column(
+        modifier              = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        horizontalAlignment   = Alignment.CenterHorizontally,
+        verticalArrangement   = Arrangement.spacedBy(8.dp),
+    ) {
+        if (!isBroadcasting) {
+            Button(
+                onClick  = onBroadcast,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                shape    = RoundedCornerShape(14.dp),
+                colors   = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFFD32F2F),
+                    contentColor   = Color.White,
+                ),
+            ) {
+                Text(
+                    "📡  Broadcast SOS — Alert Nearby Helpers",
+                    fontWeight = FontWeight.Bold,
+                    fontSize   = 15.sp,
+                )
+            }
+            Text(
+                "Sends your location & emergency type to nearby SecondLife users via Bluetooth",
+                fontSize  = 11.sp,
+                color     = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                lineHeight = 16.sp,
+                modifier  = Modifier.fillMaxWidth(),
+            )
+        } else {
+            // Pulsing "broadcasting" state with responder count
+            androidx.compose.foundation.layout.Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .scale(scale)
+                    .background(Color(0xFF1B5E20), RoundedCornerShape(14.dp))
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "📡  SOS BROADCASTING",
+                        color      = Color.White,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize   = 15.sp,
+                        letterSpacing = 1.sp,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (responderCount == 0) "Waiting for nearby helpers…"
+                        else "$responderCount helper${if (responderCount != 1) "s" else ""} responding",
+                        color    = Color(0xFF81C784),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
+            TextButton(onClick = onStop) {
+                Text("Stop Broadcasting", color = Color(0xFF888888), fontSize = 12.sp)
+            }
+        }
+    }
+}
 
 @Composable
 fun MeshStatusBar(isBroadcasting: Boolean, responderCount: Int) {
@@ -434,7 +525,20 @@ fun MainScreenContent(
                             isLoading = isLatest && state.isThinking,
                         )
                     }
-                    // Responder list card — shown below transcript when broadcasting
+                    // SOS broadcast button — shown after a response, before broadcasting
+                    val hasResponse = state.transcript.any { it.response != null }
+                    if (hasResponse) {
+                        item("sos_button") {
+                            SosBroadcastButton(
+                                isBroadcasting  = state.isBroadcasting,
+                                responderCount  = state.responderCount,
+                                onBroadcast     = callbacks.onBroadcastSos,
+                                onStop          = callbacks.onStopBroadcast,
+                            )
+                        }
+                    }
+
+                    // Responder list card — shown below SOS button when helpers join
                     if (state.responderTasks.isNotEmpty()) {
                         item("responders") {
                             ResponderListCard(responderTasks = state.responderTasks)

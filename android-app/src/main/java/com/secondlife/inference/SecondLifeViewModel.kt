@@ -10,6 +10,7 @@ import com.secondlife.emergency.EmergencyRouter
 import com.secondlife.emergency.EmergencyTimerManager
 import com.secondlife.emergency.ProtocolCardCache
 import com.secondlife.emergency.TimerState
+import com.secondlife.mesh.CompassNavigator
 import com.secondlife.mesh.MeshManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -75,6 +76,9 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         onRSSIUpdate         = { rssi -> onRSSIUpdate(rssi) },
     )
 
+    // Compass navigator — guides Person B toward Person A
+    val navigator = CompassNavigator(application)
+
     private val _isBroadcasting = MutableStateFlow(false)
     val isBroadcasting: StateFlow<Boolean> = _isBroadcasting.asStateFlow()
 
@@ -89,6 +93,14 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
 
     private val _assignedTask = MutableStateFlow<String?>(null)
     val assignedTask: StateFlow<String?> = _assignedTask.asStateFlow()
+
+    // True once Person B has accepted a nearby emergency and is navigating
+    private val _isResponder = MutableStateFlow(false)
+    val isResponder: StateFlow<Boolean> = _isResponder.asStateFlow()
+
+    // The endpoint ID of the broadcaster — stored when Person B receives alert
+    private val _pendingEndpointId = MutableStateFlow<String?>(null)
+    val pendingEndpointId: StateFlow<String?> = _pendingEndpointId.asStateFlow()
 
     // ── Sessions ────────────────────────────────────────────────────────────
     private val initialSession = EmergencySession()
@@ -122,15 +134,8 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
     init {
         // Preload model at app start — not on first query.
         viewModelScope.launch { session.initModel() }
-        // Start scanning for nearby emergencies.
+        // Always passively scan so Person B gets alerts automatically.
         meshManager.startScanning()
-        // Auto-broadcast when a high-severity response arrives.
-        viewModelScope.launch {
-            session.response.collect { result ->
-                result ?: return@collect
-                checkAndBroadcast(result)
-            }
-        }
     }
 
     // ── Camera ──────────────────────────────────────────────────────────────
@@ -276,58 +281,120 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         timerManager.release()
         session.release()
         meshManager.release()
+        navigator.stopNavigation()
     }
 
-    // ── Mesh callbacks ───────────────────────────────────────────────────────
+    // ── Mesh callbacks (called from MeshManager on background thread) ────────
 
+    // Person B receives a nearby SOS — store it and show the alert screen.
     private fun onEmergencyReceived(broadcast: MeshManager.EmergencyBroadcast, endpointId: String) {
         viewModelScope.launch {
+            _pendingEndpointId.emit(endpointId)
             _nearbyEmergency.emit(broadcast)
         }
     }
 
+    // Person A's side — a new responder has connected to our broadcast.
     private fun onResponderJoined(endpointId: String, count: Int) {
         viewModelScope.launch {
             _responderCount.emit(count)
-            if (count > 0) {
-                val task = meshManager.assignTask(count)
-                val current = _responderTasks.value.toMutableMap()
-                current[endpointId] = task
-                _responderTasks.emit(current)
-                meshManager.sendTaskAssignment(endpointId, task)
-            }
+            val task = meshManager.assignTask(count)
+            val current = _responderTasks.value.toMutableMap()
+            current[endpointId] = task
+            _responderTasks.emit(current)
+            meshManager.sendTaskAssignment(endpointId, task)
         }
     }
 
+    // Person B receives their assigned task from Person A's device.
     private fun onTaskReceived(task: String) {
         viewModelScope.launch { _assignedTask.emit(task) }
     }
 
+    // RSSI update from Nearby — forward to compass navigator for distance label.
     private fun onRSSIUpdate(rssi: Int) {
-        // No-op at ViewModel level — navigator handles RSSI display
+        navigator.updateRSSI(rssi)
     }
 
-    // ── Mesh actions ─────────────────────────────────────────────────────────
+    // ── Person A actions (broadcaster — the injured person) ───────────────────
 
-    fun respondToEmergency(endpointId: String) {
-        val broadcast = _nearbyEmergency.value ?: return
-        meshManager.joinSession(endpointId, broadcast.sessionId)
+    /**
+     * Manually triggered by Person A after they get first-aid guidance.
+     * Packages their emergency info and broadcasts it to nearby devices.
+     */
+    fun broadcastSos() {
+        if (_isBroadcasting.value) return
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val loc     = getLastKnownLocation()
+                val latest  = response.value
+                val summary = latest?.response?.take(80) ?: "Emergency — need help"
+                val severity = latest?.severity ?: 3
+                val packet  = session.generateBroadcastPacket(
+                    sessionSummary  = summary,
+                    severity        = severity,
+                    sessionId       = java.util.UUID.randomUUID().toString(),
+                    broadcasterLat  = loc?.latitude  ?: 0.0,
+                    broadcasterLng  = loc?.longitude ?: 0.0,
+                )
+                meshManager.startBroadcasting(packet)
+                _isBroadcasting.emit(true)
+            } catch (e: Exception) {
+                android.util.Log.w("SecondLifeVM", "broadcastSos failed: ${e.message}")
+                postError("Could not start SOS broadcast — check Bluetooth")
+            }
+        }
     }
 
-    fun dismissEmergency() {
-        viewModelScope.launch { _nearbyEmergency.emit(null) }
-    }
-
-    fun endSession() {
+    fun stopBroadcast() {
         meshManager.stopBroadcasting()
-        meshManager.stopScanning()
         viewModelScope.launch {
             _isBroadcasting.emit(false)
             _responderCount.emit(0)
             _responderTasks.emit(emptyMap())
         }
+    }
+
+    // ── Person B actions (responder — the bystander going to help) ────────────
+
+    /**
+     * Person B taps "I'll Help". Start compass navigation toward Person A
+     * and join their Nearby session to receive task assignment.
+     */
+    fun acceptEmergency() {
+        val broadcast   = _nearbyEmergency.value ?: return
+        val endpointId  = _pendingEndpointId.value ?: return
+        // Start compass pointing toward the broadcaster's GPS position
+        navigator.startNavigation(broadcast.broadcasterLat, broadcast.broadcasterLng)
+        // Connect to Person A's Nearby session
+        meshManager.joinSession(endpointId, broadcast.sessionId)
+        viewModelScope.launch {
+            _isResponder.emit(true)
+            _nearbyEmergency.emit(null)   // dismiss the alert — compass screen takes over
+        }
+    }
+
+    /** Person B dismisses the alert without helping. */
+    fun dismissEmergency() {
+        viewModelScope.launch {
+            _nearbyEmergency.emit(null)
+            _pendingEndpointId.emit(null)
+        }
+    }
+
+    /** Person B has physically arrived at the scene. Stop navigation. */
+    fun arrivedAtScene() {
+        navigator.stopNavigation()
+        viewModelScope.launch { _isResponder.emit(false) }
+    }
+
+    fun endSession() {
+        stopBroadcast()
+        meshManager.stopScanning()
         cancelSession()
     }
+
+    // ── Demo mode — long-press to simulate full mesh flow on one device ───────
 
     fun triggerDemoMesh() {
         viewModelScope.launch {
@@ -344,27 +411,26 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    // ── Auto-broadcast ───────────────────────────────────────────────────────
-
-    private fun checkAndBroadcast(result: SecondLifeResponse) {
-        if ((result.severity ?: 0) >= 3 && !_isBroadcasting.value) {
-            viewModelScope.launch(Dispatchers.IO) {
-                try {
-                    val loc = getLastKnownLocation()
-                    val summary = result.response.take(120)
-                    val packet = session.generateBroadcastPacket(
-                        summary, result.severity ?: 3,
-                        java.util.UUID.randomUUID().toString(),
-                        loc?.latitude ?: 0.0, loc?.longitude ?: 0.0
-                    )
-                    meshManager.startBroadcasting(packet)
-                    _isBroadcasting.emit(true)
-                } catch (e: Exception) {
-                    android.util.Log.w("ViewModel", "Auto-broadcast failed: ${e.message}")
-                }
-            }
+    /** Demo: simulate receiving an incoming SOS as if you were Person B. */
+    fun triggerDemoIncomingAlert() {
+        viewModelScope.launch {
+            _pendingEndpointId.emit("demo_endpoint")
+            _nearbyEmergency.emit(
+                MeshManager.EmergencyBroadcast(
+                    severity         = 4,
+                    type             = "fracture",
+                    summary          = "Broken leg, can't walk, needs help",
+                    sessionId        = "demo-session-001",
+                    respondersNeeded = 2,
+                    broadcasterLat   = 0.0,   // GPS unavailable in demo
+                    broadcasterLng   = 0.0,
+                    broadcasterAccuracy = 0f,
+                )
+            )
         }
     }
+
+    // ── Location helper ───────────────────────────────────────────────────────
 
     @SuppressLint("MissingPermission")
     private suspend fun getLastKnownLocation(): android.location.Location? =
