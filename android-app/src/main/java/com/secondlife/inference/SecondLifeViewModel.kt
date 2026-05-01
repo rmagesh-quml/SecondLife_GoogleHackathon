@@ -144,9 +144,9 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         session.currentMode = mode
     }
 
-    /** Exit the current session: stop timers and start a fresh one. */
+    /** Exit the current session: clear timers and start a fresh one. */
     fun cancelSession() {
-        timerManager.stopTimer()
+        timerManager.resetTimer()
         timerManager.stopMetronome()
         newSession()
     }
