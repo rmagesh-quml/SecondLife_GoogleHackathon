@@ -100,6 +100,7 @@ class MeshService : Service() {
             .build()
 
     private fun onEmergencyReceived(broadcast: MeshManager.EmergencyBroadcast, endpointId: String) {
+        Log.i(TAG, "🚨 EMERGENCY RECEIVED in background: ${broadcast.type} from $endpointId")
         _pendingEndpointId.value = endpointId
         _nearbyEmergency.value = broadcast
         

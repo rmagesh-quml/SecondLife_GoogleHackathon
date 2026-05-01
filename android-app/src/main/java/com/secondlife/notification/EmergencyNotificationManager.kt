@@ -39,6 +39,8 @@ object EmergencyNotificationManager {
                 description = "Urgent SOS alerts from nearby people"
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 500, 200, 500)
+                setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI, null)
+                lockscreenVisibility = androidx.core.app.NotificationCompat.VISIBILITY_PUBLIC
             }
             nm.createNotificationChannel(alertChannel)
         }

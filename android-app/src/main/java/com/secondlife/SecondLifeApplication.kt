@@ -1,6 +1,8 @@
 package com.secondlife
 
 import android.app.Application
+import android.content.Intent
+import android.os.Build
 import android.util.Log
 import com.secondlife.inference.InferenceSession
 import kotlinx.coroutines.CoroutineScope
@@ -54,6 +56,14 @@ class SecondLifeApplication : Application() {
         inferenceSession = InferenceSession(applicationContext, resolveModelPath())
         appScope.launch {
             inferenceSession.initModel()
+        }
+
+        // ── 4. Ensure MeshService is running for background SOS detection ────
+        val serviceIntent = Intent(this, com.secondlife.mesh.MeshService::class.java)
+        if (Build.VERSION.SDK_INT >= 26) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
         }
     }
 
