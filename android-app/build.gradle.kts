@@ -20,12 +20,23 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
+        debug {
+            isMinifyEnabled = false
+            // Expose BuildConfig.DEBUG so demo/test helpers are compiled out of release
+            buildConfigField("boolean", "DEBUG", "true")
+        }
+    }
+
+    buildFeatures {
+        compose = true
+        buildConfig = true
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -35,9 +46,6 @@ android {
         compilerOptions {
             jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
         }
-    }
-    buildFeatures {
-        compose = true
     }
 }
 

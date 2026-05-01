@@ -12,6 +12,7 @@ import com.secondlife.MainActivity
 object EmergencyNotificationManager {
     private const val ACTIVE_CHANNEL_ID = "secondlife_active"
     private const val ALERT_CHANNEL_ID  = "secondlife_alerts"
+    const val NOTIF_ID_FOREGROUND = 1001   // Used by MeshService.startForeground()
     private const val NOTIF_ID_ACTIVE = 1001
     private const val NOTIF_ID_ALERT  = 1002
 

@@ -99,8 +99,7 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    private val meshManager get() = meshService?.meshManager 
-        ?: throw IllegalStateException("MeshService not bound")
+    private val meshManager get() = meshService?.meshManager
 
     // ── Sessions ────────────────────────────────────────────────────────────
     private val initialSession = EmergencySession()
@@ -127,8 +126,6 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
 
     val response: StateFlow<SecondLifeResponse?> =
         transcript.stateInMappedToResponse()
-
-    init {}
 
     // ── Camera ──────────────────────────────────────────────────────────────
     fun setCapturedImage(bitmap: Bitmap?) { _capturedImage.value = bitmap }
@@ -284,7 +281,11 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         broadcastJob?.cancel()
         broadcastJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                meshManager.stopScanning()
+                val mm = meshManager ?: run {
+                    postError("Mesh service not ready — please wait a moment")
+                    return@launch
+                }
+                mm.stopScanning()
                 val locationClient = LocationServices.getFusedLocationProviderClient(getApplication())
                 
                 // 1. Get whatever we have immediately so the demo starts fast
@@ -309,8 +310,8 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
                         broadcasterLng = loc?.longitude ?: 0.0,
                         broadcasterAccuracy = loc?.accuracy ?: 0f,
                     )
-                    meshManager.stopBroadcasting()
-                    meshManager.startBroadcasting(packet)
+                    mm.stopBroadcasting()
+                    mm.startBroadcasting(packet)
                 }
 
                 // Send initial packet immediately
@@ -334,26 +335,24 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
                 }
 
                 locationFlow.collect { loc ->
-                    val connected = meshManager.getConnectedEndpoints()
+                    val connected = mm.getConnectedEndpoints()
                     if (connected.isNotEmpty()) {
                         // Responders are already connected via P2P — push location as a payload.
                         // Do NOT call stopBroadcasting() here: that disconnects all responders!
                         connected.forEach { endpointId ->
-                            meshManager.sendLocationUpdate(endpointId, loc.latitude, loc.longitude)
+                            mm.sendLocationUpdate(endpointId, loc.latitude, loc.longitude)
                         }
-                        android.util.Log.d("SecondLifeVM", "Sent LOC payload to ${connected.size} responders: ${loc.latitude}, ${loc.longitude}")
                     } else {
                         // No one connected yet — re-advertise with updated coordinates so
                         // new discoverers see the fresh position in the BLE endpoint name.
                         sendSosUpdate(loc)
-                        android.util.Log.d("SecondLifeVM", "Re-advertising SOS with fresh coords: ${loc.latitude}, ${loc.longitude}")
                     }
                 }
             } catch (e: Exception) {
                 android.util.Log.e("SecondLifeVM", "broadcastSos failed: ${e.message}", e)
                 _isBroadcasting.emit(false)
                 meshService?.setIsBroadcasting(false)
-                runCatching { meshManager.startScanning() }
+                runCatching { meshManager?.startScanning() }
                 postError("Could not start SOS broadcast — is Bluetooth on?")
             }
         }
@@ -362,13 +361,13 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
     fun stopBroadcast() {
         broadcastJob?.cancel()
         broadcastJob = null
-        meshManager.stopBroadcasting()
+        meshManager?.stopBroadcasting()
         viewModelScope.launch {
             _isBroadcasting.emit(false)
             meshService?.setIsBroadcasting(false)
             _responderCount.emit(0)
             _responderTasks.emit(emptyMap())
-            withContext(Dispatchers.IO) { meshManager.startScanning() }
+            withContext(Dispatchers.IO) { meshManager?.startScanning() }
         }
     }
 
@@ -381,7 +380,7 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
         android.util.Log.i("SecondLifeVM", "Accepting emergency from $endpointId. Location: ${broadcast.broadcasterLat}, ${broadcast.broadcasterLng}")
 
         navigator.startNavigation(broadcast.broadcasterLat, broadcast.broadcasterLng)
-        meshManager.joinSession(endpointId, broadcast.sessionId)
+        meshManager?.joinSession(endpointId, broadcast.sessionId)
         viewModelScope.launch {
             _isResponder.emit(true)
             _nearbyEmergency.emit(null)
@@ -402,15 +401,16 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
 
     fun endSession() {
         stopBroadcast()
-        meshManager.stopScanning()
+        meshManager?.stopScanning()
         cancelSession()
     }
 
-    // ── Demo mode ──────────────────────────────────────────────────────────────
+    // ── Demo mode (debug builds only — never ships in release) ────────────────
 
     fun triggerDemoMesh() {
+        if (!com.secondlife.BuildConfig.DEBUG) return
         viewModelScope.launch(Dispatchers.IO) {
-            meshManager.stopScanning()
+            meshManager?.stopScanning()
             val locationClient = LocationServices.getFusedLocationProviderClient(getApplication())
             val lastLoc = try {
                 com.google.android.gms.tasks.Tasks.await(locationClient.lastLocation, 1, java.util.concurrent.TimeUnit.SECONDS)
@@ -426,12 +426,13 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
                 broadcasterLng    = lastLoc?.longitude ?: -122.084,
                 broadcasterAccuracy = lastLoc?.accuracy ?: 10f,
             )
-            meshManager.startBroadcasting(packet)
+            meshManager?.startBroadcasting(packet)
             meshService?.setIsBroadcasting(true)
         }
     }
 
     fun triggerDemoIncomingAlert() {
+        if (!com.secondlife.BuildConfig.DEBUG) return
         viewModelScope.launch(Dispatchers.IO) {
             _pendingEndpointId.emit("demo_endpoint")
             // Use real GPS coordinates so the compass needle renders in demo mode.

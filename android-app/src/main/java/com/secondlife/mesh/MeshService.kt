@@ -61,7 +61,7 @@ class MeshService : Service() {
         Log.d(TAG, "MeshService created")
         
         EmergencyNotificationManager.createChannels(this)
-        startForeground(1001, createServiceNotification())
+        startForeground(EmergencyNotificationManager.NOTIF_ID_FOREGROUND, createServiceNotification())
 
         meshManager = MeshManager(
             context             = this,
@@ -117,7 +117,12 @@ class MeshService : Service() {
         _nearbyEmergency.value = broadcast
         
         // Repeated buzzing for 2 seconds to make sure it's noticed
-        val vibrator = getSystemService(android.os.Vibrator::class.java)
+        val vibrator: android.os.Vibrator = if (android.os.Build.VERSION.SDK_INT >= 31) {
+            getSystemService(android.os.VibratorManager::class.java).defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(android.os.Vibrator::class.java)
+        }
         val pattern = longArrayOf(0, 400, 200, 400, 200, 400, 200, 400)
         if (android.os.Build.VERSION.SDK_INT >= 26) {
             vibrator.vibrate(android.os.VibrationEffect.createWaveform(pattern, -1))

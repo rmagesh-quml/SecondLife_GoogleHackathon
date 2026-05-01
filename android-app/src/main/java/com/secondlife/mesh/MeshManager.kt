@@ -40,8 +40,10 @@ class MeshManager(
 
     private val connectionsClient by lazy { Nearby.getConnectionsClient(context) }
 
-    private val connectedEndpoints = mutableListOf<String>()
-    private val discoveredEndpoints = mutableMapOf<String, EmergencyBroadcast>()
+    // CopyOnWrite collections: Nearby Connections fires callbacks on its own thread pool,
+    // so these must be safe for concurrent reads/writes without explicit locking.
+    private val connectedEndpoints = java.util.concurrent.CopyOnWriteArrayList<String>()
+    private val discoveredEndpoints = java.util.concurrent.ConcurrentHashMap<String, EmergencyBroadcast>()
 
     data class EmergencyBroadcast(
         val severity: Int,
