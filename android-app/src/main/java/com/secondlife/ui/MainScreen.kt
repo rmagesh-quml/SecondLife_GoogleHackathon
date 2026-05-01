@@ -744,7 +744,7 @@ private fun ProtocolCard(response: SecondLifeResponse, role: String, isActive: B
     val accent = ext.colorForRole(role)
     val title  = protocolTitleFromCitation(response.citation)
     val source = sourceLabelFromCitation(response.citation)
-    val steps  = parseNumberedSteps(response.response)
+    val steps  = response.steps.ifEmpty { parseNumberedSteps(response.response) }
     val borderAlpha = if (isActive) 0.6f else 0.2f
 
     Card(

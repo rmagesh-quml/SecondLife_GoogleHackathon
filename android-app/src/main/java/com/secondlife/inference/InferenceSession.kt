@@ -311,19 +311,29 @@ Respond ONLY with valid JSON — no other text before or after:
 
     private fun parseJsonOrFallback(raw: String, fallbackSteps: List<String>?): ParsedResponse {
         return try {
-            val json = raw
+            // Strip markdown fences, then find the first {...} block
+            val stripped = raw
                 .substringAfter("```json").substringAfter("```").substringBefore("```")
                 .trim()
-                .let { if (it.startsWith("{")) it else raw.trim() }
-            val obj  = JSONObject(json)
-            val speak = obj.optString("speak", "").ifBlank { raw }
+            val jsonStart = stripped.indexOf('{')
+            val jsonEnd   = stripped.lastIndexOf('}')
+            val json = if (jsonStart >= 0 && jsonEnd > jsonStart)
+                stripped.substring(jsonStart, jsonEnd + 1)
+            else
+                stripped.ifBlank { raw }
+            val obj      = JSONObject(json)
+            val speak    = obj.optString("speak", "").ifBlank { null }
             val stepsArr = obj.optJSONArray("steps")
-            val steps = if (stepsArr != null) (0 until stepsArr.length()).map { stepsArr.getString(it) }
-                        else emptyList()
-            val ask = obj.optString("ask", "").ifBlank { null }
-            ParsedResponse(speak, steps, ask)
+            val steps    = if (stepsArr != null) (0 until stepsArr.length()).map { stepsArr.getString(it) }
+                           else emptyList()
+            val ask      = obj.optString("ask", "").ifBlank { null }
+            // If speak is empty but we have steps, synthesize a short sentence
+            val displayText = speak ?: steps.firstOrNull() ?: (fallbackSteps?.firstOrNull() ?: "Follow the steps below.")
+            ParsedResponse(displayText, steps, ask)
         } catch (_: Exception) {
-            ParsedResponse(speak = raw, steps = fallbackSteps ?: emptyList(), ask = null)
+            // JSON parse failed — use fallback steps and avoid showing raw JSON
+            val display = fallbackSteps?.firstOrNull() ?: "Follow the protocol steps."
+            ParsedResponse(speak = display, steps = fallbackSteps ?: emptyList(), ask = null)
         }
     }
 
