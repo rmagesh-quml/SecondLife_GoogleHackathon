@@ -29,6 +29,13 @@ class SecondLifeApplication : Application() {
     override fun onCreate() {
         super.onCreate()
 
+        try {
+            System.loadLibrary("litertlm_jni")
+            Log.i("SECONDLIFE", "Native library litertlm_jni loaded successfully")
+        } catch (e: UnsatisfiedLinkError) {
+            Log.e("SECONDLIFE", "Failed to load native library litertlm_jni", e)
+        }
+
         // ── 1. Log the previous crash (if any) so we can diagnose on next run ──
         logPreviousCrash()
 

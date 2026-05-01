@@ -33,10 +33,9 @@ class MeshManager(
     private val TAG = "MeshManager"
     private val SERVICE_ID = "com.secondlife.emergency"
 
-    // P2P_STAR: one hub (Person A advertises), many spokes (bystanders discover).
-    // More reliable than P2P_CLUSTER for our use case — hub must NOT also run
-    // discovery simultaneously, which P2P_STAR enforces cleanly.
-    private val STRATEGY = Strategy.P2P_STAR
+    // P2P_CLUSTER: any-to-any discovery. More robust for mobile devices finding
+    // each other in unpredictable environments.
+    private val STRATEGY = Strategy.P2P_CLUSTER
 
     private val connectionsClient by lazy { Nearby.getConnectionsClient(context) }
 
@@ -151,10 +150,10 @@ class MeshManager(
     fun startBroadcasting(broadcast: EmergencyBroadcast) {
         Log.d(TAG, "📡 SOS broadcast started [${broadcast.type}] — Bluetooth only, no internet")
 
-        // Use low-power Bluetooth advertising so the battery lasts in an emergency.
-        // Discovery uses BLE; data transfer upgrades to Bluetooth Classic automatically.
+        // Use high-power advertising for emergency speed.
         val options = AdvertisingOptions.Builder()
             .setStrategy(STRATEGY)
+            .setLowPower(false)
             .build()
 
         connectionsClient.startAdvertising(
@@ -203,6 +202,7 @@ class MeshManager(
         Log.d(TAG, "🔍 BLE scan starting — listening for nearby SOS")
         val options = DiscoveryOptions.Builder()
             .setStrategy(STRATEGY)
+            .setLowPower(false)
             .build()
 
         connectionsClient.startDiscovery(SERVICE_ID, endpointDiscoveryCallback, options)
@@ -269,29 +269,44 @@ class MeshManager(
     // The endpoint name is broadcast over BLE and visible without connecting.
     // This lets Person B's device decode the emergency type instantly.
 
-    private fun encodeBroadcast(b: EmergencyBroadcast): String =
-        JSONObject().apply {
-            put("s",  b.severity)
-            put("t",  b.type)
-            put("m",  b.summary.take(40))
-            put("id", b.sessionId.take(8))
-            put("n",  b.respondersNeeded)
-            put("la", b.broadcasterLat)
-            put("lo", b.broadcasterLng)
-            put("ac", b.broadcasterAccuracy)
-        }.toString()
+    private fun encodeBroadcast(b: EmergencyBroadcast): String {
+        // Compact pipe-separated format to stay within 131-byte limit.
+        // Format: v1|severity|type|summary|sessionIdShort|respondersNeeded|lat|lng|acc
+        val lat = "%.6f".format(b.broadcasterLat)
+        val lng = "%.6f".format(b.broadcasterLng)
+        return "v1|${b.severity}|${b.type.replace("|", "")}|${b.summary.take(40).replace("|", "")}|" +
+               "${b.sessionId.take(8)}|${b.respondersNeeded}|$lat|$lng|${b.broadcasterAccuracy}"
+    }
 
     private fun decodeBroadcast(encoded: String): EmergencyBroadcast {
-        val j = JSONObject(encoded)
+        if (!encoded.startsWith("v1|")) {
+            // Fallback for old JSON format if any still exist in the air
+            return try {
+                val j = JSONObject(encoded)
+                EmergencyBroadcast(
+                    severity            = j.optInt("s", 3),
+                    type                = j.optString("t", "other"),
+                    summary             = j.optString("m", "Emergency assistance needed"),
+                    sessionId           = j.optString("id", "unknown"),
+                    respondersNeeded    = j.optInt("n", 2),
+                    broadcasterLat      = j.optDouble("la", 0.0),
+                    broadcasterLng      = j.optDouble("lo", 0.0),
+                    broadcasterAccuracy = j.optDouble("ac", 0.0).toFloat(),
+                )
+            } catch (e: Exception) {
+                throw Exception("Unknown SOS format: $encoded")
+            }
+        }
+        val parts = encoded.split("|")
         return EmergencyBroadcast(
-            severity            = j.optInt("s", 3),
-            type                = j.optString("t", "other"),
-            summary             = j.optString("m", "Emergency assistance needed"),
-            sessionId           = j.optString("id", "unknown"),
-            respondersNeeded    = j.optInt("n", 2),
-            broadcasterLat      = j.optDouble("la", 0.0),
-            broadcasterLng      = j.optDouble("lo", 0.0),
-            broadcasterAccuracy = j.optDouble("ac", 0.0).toFloat(),
+            severity            = parts.getOrNull(1)?.toIntOrNull() ?: 3,
+            type                = parts.getOrNull(2) ?: "other",
+            summary             = parts.getOrNull(3) ?: "Emergency assistance needed",
+            sessionId           = parts.getOrNull(4) ?: "unknown",
+            respondersNeeded    = parts.getOrNull(5)?.toIntOrNull() ?: 2,
+            broadcasterLat      = parts.getOrNull(6)?.toDoubleOrNull() ?: 0.0,
+            broadcasterLng      = parts.getOrNull(7)?.toDoubleOrNull() ?: 0.0,
+            broadcasterAccuracy = parts.getOrNull(8)?.toFloatOrNull() ?: 0f,
         )
     }
 }
