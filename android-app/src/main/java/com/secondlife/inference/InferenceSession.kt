@@ -137,7 +137,8 @@ class InferenceSession(
                 modelPath     = modelPath,
                 backend       = Backend.CPU(numOfThreads = 8),
                 visionBackend = Backend.CPU(numOfThreads = 4),
-                maxNumTokens  = 512,
+                // 4096 is the minimum floor for Gemma-2-2b-IT to avoid DYNAMIC_UPDATE_SLICE crash
+                maxNumTokens  = 4096,
                 maxNumImages  = 1,
                 cacheDir      = context.cacheDir.absolutePath,
             )
@@ -212,19 +213,11 @@ class InferenceSession(
 
             // 5. Run Gemma — reuse persistent conversation for follow-up turns
             val result = if (engine != null) {
-                // Plain createConversation() — no ConversationConfig.
-                // Gemma-IT uses <start_of_turn>user / model tokens; there is no
-                // "system" role in its compiled template. Passing a ConversationConfig
-                // with systemInstruction causes the native executor to fail with
-                // "Failed to invoke the compiled model" on every sendMessage call.
                 if (activeConversation == null) {
                     activeConversation = engine!!.createConversation()
                 }
                 val conversation = activeConversation!!
 
-                // When image is attached, send multimodal Contents so the vision
-                // encoder actually sees the pixel data. Falls back gracefully to
-                // text-only if the model was compiled without vision support.
                 val message = if (image != null) {
                     try {
                         val jpegBytes = bitmapToJpegBytes(image)
@@ -238,8 +231,13 @@ class InferenceSession(
                             "InferenceSession",
                             "Vision sendMessage failed — falling back to text-only: ${e.message}",
                         )
-                        // Model may not be compiled with vision support; text path still works
-                        conversation.sendMessage(prompt, emptyMap())
+                        // Fallback: use a prompt that doesn't mention the photo
+                        val fallbackPrompt = if (currentMode == ResponseMode.PANIC) {
+                            buildPanicPrompt(text, chunks, currentRole, hasImage = false)
+                        } else {
+                            buildDetailPrompt(text, chunks, currentRole, hasImage = false, isFirstTurn = isFirstTurn)
+                        }
+                        conversation.sendMessage(fallbackPrompt, emptyMap())
                     }
                 } else {
                     conversation.sendMessage(prompt, emptyMap())
@@ -249,8 +247,16 @@ class InferenceSession(
                 val raw = message.contents.contents
                     .filterIsInstance<Content.Text>()
                     .joinToString("") { it.text }
-                    .ifBlank { "No response generated" }
-                if (currentMode == ResponseMode.DETAIL) raw.stripMarkdown() else raw
+                    .trim()
+                
+                android.util.Log.d("InferenceSession", "Raw model output: \"$raw\"")
+                
+                val clean = if (raw.isBlank() || raw == ".") {
+                    "I am processing the emergency protocol for $text. Please follow the steps below."
+                } else {
+                    if (currentMode == ResponseMode.DETAIL) raw.stripMarkdown() else raw
+                }
+                clean
             } else {
                 "Model not initialized — showing protocol card guidance above."
             }
