@@ -141,7 +141,7 @@ fun MainScreen(
     val timerState     by viewModel.timerState.collectAsStateWithLifecycle()
     val metronomeBeat  by viewModel.metronomeBeat.collectAsStateWithLifecycle()
     val handoffReport  by viewModel.handoffReport.collectAsStateWithLifecycle()
-    var selectedMode   by remember { mutableStateOf(ResponseMode.PANIC) }
+    var selectedMode   by remember { mutableStateOf(ResponseMode.DETAIL) }
 
     // Tick once per second to update the session timer without recomposing
     // the entire tree on every frame.

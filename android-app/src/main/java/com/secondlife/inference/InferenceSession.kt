@@ -47,7 +47,7 @@ class InferenceSession(
     private val auditLog  = KotlinAuditLog()
 
     var currentRole: String = "layperson"
-    var currentMode: ResponseMode = ResponseMode.PANIC
+    var currentMode: ResponseMode = ResponseMode.DETAIL
 
     // Hardcoded protocol chunks for the 9 most common emergencies — skip BM25 entirely.
     private val protocolChunkCache: Map<EmergencyRouter.ProtocolId, ProtocolChunk> = mapOf(
@@ -252,7 +252,9 @@ Protocol context: $contextLine
 Emergency: $query
 
 Respond ONLY with valid JSON — no other text before or after:
-{"speak":"<25 words max, most critical action first>","steps":["step 1","step 2","step 3"],"ask":"<one follow-up question>"}"""
+{"speak":"<1-2 sentence summary of the most critical immediate actions for THIS specific emergency>","steps":["specific step 1","specific step 2","specific step 3","specific step 4"],"ask":"<one follow-up question to assess severity>"}
+
+The "speak" field must describe the actual emergency actions, not generic phrases like "follow these steps"."""
     }
 
     // Detail mode: full context, numbered steps with role-appropriate explanations
