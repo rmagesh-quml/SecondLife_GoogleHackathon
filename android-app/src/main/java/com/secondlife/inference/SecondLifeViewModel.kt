@@ -291,7 +291,8 @@ class SecondLifeViewModel(application: Application) : AndroidViewModel(applicati
                 _isBroadcasting.emit(true)
                 meshService?.setIsBroadcasting(true)
             } catch (e: Exception) {
-                meshManager.startScanning()
+                android.util.Log.e("SecondLifeVM", "broadcastSos failed: ${e.message}", e)
+                runCatching { meshManager.startScanning() }  // best-effort restart
                 postError("Could not start SOS broadcast — is Bluetooth on?")
             }
         }

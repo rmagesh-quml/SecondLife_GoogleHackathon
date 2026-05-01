@@ -267,15 +267,19 @@ class MeshManager(
     // This lets Person B's device decode the emergency type instantly.
 
     private fun encodeBroadcast(b: EmergencyBroadcast): String {
-        // Compact pipe-separated format to stay within 131-byte limit.
-        // Format: v1|severity|type|summary|sessionIdShort|respondersNeeded|lat|lng|acc
-        // Limit summary to 30 chars to ensure packet is small enough for maximum range.
-        val lat = "%.6f".format(b.broadcasterLat)
-        val lng = "%.6f".format(b.broadcasterLng)
-        val encoded = "v1|${b.severity}|${b.type.replace("|", "")}|${b.summary.take(30).replace("|", "")}|" +
-               "${b.sessionId.take(8)}|${b.respondersNeeded}|$lat|$lng|${b.broadcasterAccuracy}"
-        
+        // Compact pipe-separated format.
+        // IMPORTANT: Nearby Connections endpoint name must stay under 100 bytes.
+        // Format: v1|sev|type|summary|sessionIdShort|respondersNeeded|lat|lng|acc
+        // All floats are explicitly formatted to control byte length.
+        val lat = "%.5f".format(b.broadcasterLat)   // e.g. "37.77493"  — 8 chars
+        val lng = "%.5f".format(b.broadcasterLng)   // e.g. "-122.41942" — 10 chars
+        val acc = "%.1f".format(b.broadcasterAccuracy) // e.g. "15.2"   — 4 chars
+        val summary = b.summary.take(25).replace("|", "")  // max 25 chars
+        val encoded = "v1|${b.severity}|${b.type.take(12).replace("|", "")}|$summary|" +
+               "${b.sessionId.take(8)}|${b.respondersNeeded}|$lat|$lng|$acc"
+
         Log.d(TAG, "Encoded SOS packet (len=${encoded.length}): $encoded")
+        if (encoded.length > 95) Log.w(TAG, "⚠️ SOS packet is ${encoded.length} bytes — close to 100-byte limit!")
         return encoded
     }
 

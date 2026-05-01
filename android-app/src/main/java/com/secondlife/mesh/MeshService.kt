@@ -70,20 +70,27 @@ class MeshService : Service() {
         meshManager.startScanning()
 
         // ── Watchdog ─────────────────────────────────────────────────────────
-        // Nearby Connections can sometimes become "stale" at range limits.
-        // Refreshing every 45s keeps the radio fresh.
+        // Nearby Connections silently drops the scan after a while (OS power
+        // management, permission re-check, edge-case failures). This watchdog
+        // ensures the scan is ALWAYS running when we are not broadcasting.
+        // Period: 20 s — short enough to catch a dead scan quickly, not so
+        // short that it hammers the radio.
         serviceScope.launch {
             while (true) {
-                kotlinx.coroutines.delay(45_000L)
+                kotlinx.coroutines.delay(20_000L)
                 if (_isBroadcasting.value) {
-                    Log.d(TAG, "Watchdog: Refreshing SOS broadcast")
-                    // We don't have the packet here, so we rely on VM to re-trigger
-                    // but for now let's just log. 
-                    // Actually, let's keep it simple: only refresh scan.
-                } else if (meshManager.isScanActive) {
-                    Log.d(TAG, "Watchdog: Refreshing background scan")
-                    meshManager.stopScanning()
-                    kotlinx.coroutines.delay(500L)
+                    // Don't touch the radio while we're in SOS mode.
+                    Log.d(TAG, "Watchdog: skip — broadcasting active")
+                } else {
+                    // Always ensure scanning is live; if it was already active
+                    // do a clean stop/start to refresh the Nearby radio state.
+                    if (meshManager.isScanActive) {
+                        Log.d(TAG, "Watchdog: refreshing background scan")
+                        meshManager.stopScanning()
+                        kotlinx.coroutines.delay(400L)
+                    } else {
+                        Log.w(TAG, "Watchdog: scan was DEAD — restarting now")
+                    }
                     meshManager.startScanning()
                 }
             }
